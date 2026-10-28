@@ -329,6 +329,7 @@ export class ApplicationSyncService {
     workspaceId,
     applicationUniversalIdentifier,
     shouldRunUninstallHook = true,
+    shouldKeepAgentChatChannels = true,
     progressReporter = createApplicationLifecycleProgressReporter({
       steps: APPLICATION_UNINSTALL_STEPS,
     }),
@@ -336,6 +337,7 @@ export class ApplicationSyncService {
     workspaceId: string;
     applicationUniversalIdentifier: string;
     shouldRunUninstallHook?: boolean;
+    shouldKeepAgentChatChannels?: boolean;
     progressReporter?: ApplicationLifecycleProgressReporter<ApplicationUninstallStep>;
   }): Promise<WorkspaceMigration> {
     const application =
@@ -356,6 +358,7 @@ export class ApplicationSyncService {
       workspaceId,
       applicationUniversalIdentifier,
       shouldRunUninstallHook,
+      shouldKeepAgentChatChannels,
       progressReporter,
     });
   }
@@ -365,12 +368,14 @@ export class ApplicationSyncService {
     workspaceId,
     applicationUniversalIdentifier,
     shouldRunUninstallHook,
+    shouldKeepAgentChatChannels,
     progressReporter,
   }: {
     application: ApplicationEntity;
     workspaceId: string;
     applicationUniversalIdentifier: string;
     shouldRunUninstallHook: boolean;
+    shouldKeepAgentChatChannels: boolean;
     progressReporter: ApplicationLifecycleProgressReporter<ApplicationUninstallStep>;
   }): Promise<WorkspaceMigration> {
     if (shouldRunUninstallHook) {
@@ -382,9 +387,11 @@ export class ApplicationSyncService {
 
     await progressReporter.reportStepCompleted('UNINSTALL_HOOK');
 
-    await this.agentChatChannelMetadataService.transferApplicationChannelsToWorkspace(
-      { workspaceId, applicationId: application.id },
-    );
+    if (shouldKeepAgentChatChannels) {
+      await this.agentChatChannelMetadataService.transferApplicationChannelsToWorkspace(
+        { workspaceId, applicationId: application.id },
+      );
+    }
 
     const flatEntityMapsCacheKeys = Object.values(ALL_METADATA_NAME).map(
       getMetadataFlatEntityMapsKey,

@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 
 import { parse } from 'graphql';
 import { type DataSource } from 'typeorm';
-import { lockAgentChatChannelForThreadWriteInTestOrThrow } from 'test/integration/ai/utils/lock-agent-chat-channel-for-thread-write-in-test-or-throw.util';
 import { SystemPermissionFlag } from 'twenty-shared/constants';
 import { isDefined } from 'twenty-shared/utils';
 
@@ -14,6 +13,7 @@ import {
   setupApplicationWithResources,
 } from 'test/integration/metadata/suites/application/utils/setup-application-with-resources.util';
 import { uninstallApplication } from 'test/integration/metadata/suites/application/utils/uninstall-application.util';
+import { findOneRoleByLabel } from 'test/integration/metadata/suites/role/utils/find-one-role-by-label.util';
 import { makeMetadataApiRequest } from 'test/integration/metadata/suites/utils/make-metadata-api-request.util';
 import { destroyAgentChatThread } from 'test/integration/utils/destroy-agent-chat-thread.util';
 import { generateApplicationTokenPair } from 'test/integration/utils/generate-application-token-pair.util';
@@ -842,6 +842,7 @@ describe('Inbox channels managed by an application', () => {
 
 describe('Uninstalling an application that created inbox channels', () => {
   const createdThreadIds: string[] = [];
+  const createdChannelIds: string[] = [];
   let uninstalledApplication: ApplicationUnderTest;
 
   beforeAll(async () => {
@@ -856,6 +857,13 @@ describe('Uninstalling an application that created inbox channels', () => {
       await destroyAgentChatThread({ threadId });
     }
 
+    for (const channelId of createdChannelIds.splice(0)) {
+      await makeMetadataApiRequest({
+        query: DELETE_CHANNEL,
+        variables: { channelId, destinationChannelId: null },
+      });
+    }
+
     if (!isDefined(uninstalledApplication)) {
       return;
     }
@@ -866,9 +874,7 @@ describe('Uninstalling an application that created inbox channels', () => {
     });
   }, 120_000);
 
-  const createThreadInChannel = async (
-    channelId: string | null,
-  ): Promise<string> => {
+  const createThreadInChannel = async (channelId: string): Promise<string> => {
     const response = await makeMetadataApiRequest({
       query: CREATE_THREAD,
       variables: { channelId },
@@ -883,64 +889,17 @@ describe('Uninstalling an application that created inbox channels', () => {
     return threadId;
   };
 
-  const fileThreadIntoChannelWhileUninstalling = async ({
-    threadId,
-    channelId,
-  }: {
-    threadId: string;
-    channelId: string;
-  }) => {
-    const queryRunner =
-      getAppProviderByClassName<DataSource>('DataSource').createQueryRunner();
-
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
-    try {
-      const [{ backendProcessId }]: { backendProcessId: number }[] =
-        await queryRunner.query(
-          'SELECT pg_backend_pid() AS "backendProcessId"',
-        );
-
-      await lockAgentChatChannelForThreadWriteInTestOrThrow({
-        manager: queryRunner.manager,
-        workspaceId: SEED_APPLE_WORKSPACE_ID,
-        channelId,
-      });
-      await queryRunner.manager
-        .createQueryBuilder()
-        .update(`${SCHEMA}.agentChatThread`)
-        .set({ channelId })
-        .where('id = :threadId', { threadId })
-        .execute();
-
-      const uninstallResponse = uninstallApplication({
-        universalIdentifier:
-          uninstalledApplication.application.universalIdentifier,
-      });
-
-      await waitForBlockedDatabaseQueryOrThrow(backendProcessId);
-      await queryRunner.commitTransaction();
-
-      return await uninstallResponse;
-    } finally {
-      if (queryRunner.isTransactionActive) {
-        await queryRunner.rollbackTransaction();
-      }
-
-      await queryRunner.release();
-    }
-  };
-
-  it('deletes its channels and moves their chats, even one filed in meanwhile, to General with the access of General', async () => {
-    const generalChannelId = await findGeneralChannelId();
+  it('keeps its channels with their chats as custom channels of the workspace, open to the roles it does not own', async () => {
+    const workspaceCustomApplicationId =
+      await findWorkspaceCustomApplicationId();
+    const { id: memberRoleId } = await findOneRoleByLabel({ label: 'Member' });
     const createResponse = await makeMetadataApiRequest(
       {
         query: CREATE_CHANNEL,
         variables: {
           input: {
             name: buildChannelName(),
-            roleIds: [uninstalledApplication.roleId],
+            roleIds: [uninstalledApplication.roleId, memberRoleId],
           },
         },
       },
@@ -950,33 +909,43 @@ describe('Uninstalling an application that created inbox channels', () => {
     assertGraphQLSuccessfulResponse(createResponse);
 
     const channelId = createResponse.body.data.createAgentChatChannel.id;
+
+    createdChannelIds.push(channelId);
+
     const threadId = await createThreadInChannel(channelId);
-    const lateThreadId = await createThreadInChannel(null);
-    const generalThreadId = await createThreadInChannel(generalChannelId);
-    const generalRoleIds = await readChannelGrantRoleIds(generalThreadId);
 
     expect(await readChannelGrantRoleIds(threadId)).toContain(
       uninstalledApplication.roleId,
     );
 
-    const { errors } = await fileThreadIntoChannelWhileUninstalling({
-      threadId: lateThreadId,
-      channelId,
+    const { errors } = await uninstallApplication({
+      universalIdentifier:
+        uninstalledApplication.application.universalIdentifier,
     });
 
     expect(errors).toBeUndefined();
-    expect(await readChannelApplicationId(channelId)).toBeUndefined();
+    expect(await readChannelApplicationId(channelId)).toBe(
+      workspaceCustomApplicationId,
+    );
+    expect(await readChannelRoleApplicationIds(channelId)).toEqual([
+      { roleId: memberRoleId, applicationId: workspaceCustomApplicationId },
+    ]);
+    expect(
+      (await listChannels(APPLE_JANE_ADMIN_ACCESS_TOKEN)).find(
+        ({ id }) => id === channelId,
+      ),
+    ).toMatchObject({
+      applicationId: workspaceCustomApplicationId,
+      roleIds: [memberRoleId],
+    });
+    expect(await readThreadChannelId(threadId)).toBe(channelId);
+    expect(await readChannelGrants(threadId)).toEqual([
+      { principalType: 'ROLE', sourceId: channelId },
+    ]);
 
-    for (const movedThreadId of [threadId, lateThreadId]) {
-      expect(await readThreadChannelState(movedThreadId)).toMatchObject({
-        channelId: generalChannelId,
-      });
-      expect(await readChannelGrants(movedThreadId)).toEqual([
-        { principalType: 'ROLE', sourceId: generalChannelId },
-      ]);
-      expect(await readChannelGrantRoleIds(movedThreadId)).toEqual(
-        generalRoleIds,
-      );
-    }
+    const grantRoleIds = await readChannelGrantRoleIds(threadId);
+
+    expect(grantRoleIds).toContain(memberRoleId);
+    expect(grantRoleIds).not.toContain(uninstalledApplication.roleId);
   }, 60_000);
 });

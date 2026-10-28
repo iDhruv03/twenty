@@ -380,7 +380,7 @@ const deleteChannelBehindStaleCache = async (channelId: string) => {
       getAppProviderByClassName<AgentChatChannelAccessService>(
         'AgentChatChannelAccessService',
       ),
-      'assertChannelAccess',
+      'assertChannelOpenToRole',
     )
     .mockResolvedValue(staleChannel);
 };

@@ -32,6 +32,7 @@ import { FlushQueuedAgentChatMessagesJob } from 'src/engine/metadata-modules/ai/
 import { StreamAgentChatJob } from 'src/engine/metadata-modules/ai/ai-chat/jobs/stream-agent-chat.job';
 import { AgentChatResolver } from 'src/engine/metadata-modules/ai/ai-chat/resolvers/agent-chat.resolver';
 import { AgentChatChannelResolver } from 'src/engine/metadata-modules/ai/ai-chat/resolvers/agent-chat-channel.resolver';
+import { AgentChatChannelManagementResolver } from 'src/engine/metadata-modules/ai/ai-chat/resolvers/agent-chat-channel-management.resolver';
 import { AgentChatThreadParticipantResolver } from 'src/engine/metadata-modules/ai/ai-chat/resolvers/agent-chat-thread-participant.resolver';
 import { AgentChatMessageReactionResolver } from 'src/engine/metadata-modules/ai/ai-chat/resolvers/agent-chat-message-reaction.resolver';
 import { AgentChatMessageReactionService } from 'src/engine/metadata-modules/ai/ai-chat/services/agent-chat-message-reaction.service';
@@ -80,6 +81,7 @@ import { AgentInboxAccessService } from 'src/engine/metadata-modules/ai/ai-chat/
     AiChatUsageResolver,
     AgentChatResolver,
     AgentChatChannelResolver,
+    AgentChatChannelManagementResolver,
     AgentChatThreadParticipantResolver,
     AgentChatMessageReactionResolver,
     AgentChatMessageReactionService,

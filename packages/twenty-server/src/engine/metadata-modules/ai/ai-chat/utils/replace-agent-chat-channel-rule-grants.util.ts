@@ -4,13 +4,10 @@ import { type EntityManager } from 'typeorm';
 
 import { AgentChatChannelRoleEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel-role.entity';
 import { AgentChatChannelEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel.entity';
+import { type AgentChatChannelGrantScope } from 'src/engine/metadata-modules/ai/ai-chat/types/agent-chat-channel-grant-scope.type';
 import { ObjectMetadataEntity } from 'src/engine/metadata-modules/object-metadata/object-metadata.entity';
 import { RoleEntity } from 'src/engine/metadata-modules/role/role.entity';
 import { getWorkspaceSchemaName } from 'src/engine/workspace-datasource/utils/get-workspace-schema-name.util';
-
-type AgentChatChannelGrantScope =
-  | { threadIds: string[] }
-  | { channelId: string };
 
 type ChannelRuleGrant = {
   objectMetadataId: string;
@@ -33,13 +30,13 @@ export const replaceAgentChatChannelRuleGrants = async ({
   const schema = getWorkspaceSchemaName(workspaceId);
   const isThreadScope = 'threadIds' in scope;
 
-  if (isThreadScope && !isNonEmptyArray(scope.threadIds)) {
+  if (!isNonEmptyArray(isThreadScope ? scope.threadIds : scope.channelIds)) {
     return;
   }
 
   const scopeParameters = isThreadScope
     ? { threadIds: scope.threadIds }
-    : { channelId: scope.channelId };
+    : { channelIds: scope.channelIds };
   const channelRuleGrantsQuery = manager
     .createQueryBuilder()
     .select('thread_object.id', 'objectMetadataId')
@@ -70,7 +67,7 @@ export const replaceAgentChatChannelRuleGrants = async ({
     .where(
       isThreadScope
         ? 'thread.id = ANY(:threadIds::uuid[])'
-        : 'thread."channelId" = :channelId',
+        : 'thread."channelId" = ANY(:channelIds::uuid[])',
       scopeParameters,
     )
     .andWhere(
@@ -102,7 +99,7 @@ export const replaceAgentChatChannelRuleGrants = async ({
     .andWhere(
       isThreadScope
         ? 'record_share."recordId" = ANY(:threadIds::uuid[])'
-        : 'record_share."sourceId" = :channelId',
+        : 'record_share."sourceId" = ANY(:channelIds::uuid[])',
     )
     .andWhere(`NOT EXISTS (${matchingGrantQuery.getQuery()})`)
     .setParameters(matchingGrantQuery.getParameters());

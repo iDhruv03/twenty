@@ -2,9 +2,16 @@ import { getApplicationDisplayName } from '@/applications/utils/getApplicationDi
 import { currentWorkspaceState } from '@/auth/states/currentWorkspaceState';
 import { SettingsAppPreferencesGeneralTab } from '@/settings/app-preferences/components/SettingsAppPreferencesGeneralTab';
 import { APPLICATION_PREFERENCES_GENERAL_TAB_ID } from '@/settings/app-preferences/constants/ApplicationPreferencesGeneralTabId';
+import { MY_APPLICATION_HEALTH_CHECK_RUNNER } from '@/settings/app-preferences/constants/MyApplicationHealthCheckRunner';
 import { SETTINGS_APPLICATION_PREFERENCES_TAB_LIST_COMPONENT_ID } from '@/settings/app-preferences/constants/SettingsApplicationPreferencesTabListComponentId';
 import { type ApplicationWithPreferences } from '@/settings/app-preferences/types/ApplicationWithPreferences';
+import { type useApplicationsWithPreferences } from '@/settings/app-preferences/hooks/useApplicationsWithPreferences';
+import { useRefetchApplicationPreferencesVariables } from '@/settings/app-preferences/hooks/useRefetchApplicationPreferencesVariables';
+import { getApplicationPreferencesGeneralPath } from '@/settings/app-preferences/utils/getApplicationPreferencesGeneralPath';
+import { SettingsApplicationHealthCheckBanner } from '@/settings/applications/components/SettingsApplicationHealthCheckBanner';
+import { SettingsApplicationHealthCheckEffect } from '@/settings/applications/components/SettingsApplicationHealthCheckEffect';
 import { APPLICATION_VARIABLES_TAB_ID } from '@/settings/applications/constants/ApplicationVariablesTabId';
+import { useSaveApplicationVariablesAndRecheckHealth } from '@/settings/applications/hooks/useSaveApplicationVariablesAndRecheckHealth';
 import { getApplicationConfigurationTabId } from '@/settings/applications/utils/getApplicationConfigurationTabId';
 import { hasApplicationVariablesTab } from '@/settings/applications/utils/hasApplicationVariablesTab';
 import { useSettingsActiveTabId } from '@/settings/components/layout/useSettingsActiveTabId';
@@ -35,7 +42,9 @@ import { SettingsApplicationStoppedBanner } from '@/settings/applications/compon
 
 type SettingsApplicationPreferencesDetailProps = {
   applicationWithPreferences: ApplicationWithPreferences;
-  refetchApplicationsWithPreferences: () => Promise<unknown>;
+  refetchApplicationsWithPreferences: ReturnType<
+    typeof useApplicationsWithPreferences
+  >['refetch'];
 };
 
 export const SettingsApplicationPreferencesDetail = ({
@@ -57,6 +66,12 @@ export const SettingsApplicationPreferencesDetail = ({
     UpdateMyUserApplicationVariableDocument,
   );
 
+  const { refetchApplicationVariables } =
+    useRefetchApplicationPreferencesVariables({
+      applicationId: application.id,
+      refetchApplicationsWithPreferences,
+    });
+
   const {
     draftApplicationVariables,
     setApplicationVariableValue,
@@ -76,8 +91,18 @@ export const SettingsApplicationPreferencesDetail = ({
           value,
         },
       }),
-    refetchApplicationVariables: refetchApplicationsWithPreferences,
+    refetchApplicationVariables,
   });
+
+  const hasMissingRequiredVariables = isNonEmptyArray(missingRequiredVariables);
+
+  const { saveApplicationVariablesAndRecheckHealth } =
+    useSaveApplicationVariablesAndRecheckHealth({
+      applicationId: application.id,
+      runner: MY_APPLICATION_HEALTH_CHECK_RUNNER,
+      hasMissingRequiredVariables,
+      saveApplicationVariables,
+    });
 
   const hasVariablesTab = hasApplicationVariablesTab({
     settingsMenuItems,
@@ -152,7 +177,7 @@ export const SettingsApplicationPreferencesDetail = ({
             variant="solid"
             color="accent"
             size="sm"
-            onClick={saveApplicationVariables}
+            onClick={saveApplicationVariablesAndRecheckHealth}
             disabled={
               !hasUnsavedApplicationVariables || isSavingApplicationVariables
             }
@@ -176,6 +201,26 @@ export const SettingsApplicationPreferencesDetail = ({
             }
           />
         )}
+      {!hasMissingRequiredVariables && (
+        <>
+          <SettingsApplicationHealthCheckEffect
+            key={application.id}
+            applicationId={application.id}
+            runner={MY_APPLICATION_HEALTH_CHECK_RUNNER}
+          />
+          <SettingsApplicationHealthCheckBanner
+            applicationId={application.id}
+            healthCheckFamilyState={
+              MY_APPLICATION_HEALTH_CHECK_RUNNER.healthCheckFamilyState
+            }
+            fallbackLocation={
+              activeTabId === APPLICATION_PREFERENCES_GENERAL_TAB_ID
+                ? undefined
+                : getApplicationPreferencesGeneralPath(application.id)
+            }
+          />
+        </>
+      )}
       <SettingsApplicationStoppedBanner
         applicationUniversalIdentifier={application.universalIdentifier}
       />

@@ -1000,7 +1000,7 @@ export default {
             "packageJsonFileId": [
                 533
             ],
-            "runOnUserPreferences": [
+            "runHealthCheckOnUserPreferences": [
                 4
             ],
             "settingsCustomTabFrontComponentId": [
@@ -1500,9 +1500,6 @@ export default {
             ],
             "connectionProviders": [
                 50
-            ],
-            "hasUserHealthCheck": [
-                4
             ],
             "settingsMenuItems": [
                 492
@@ -8469,7 +8466,7 @@ export default {
                 62,
                 {
                     "applicationId": [
-                        525,
+                        533,
                         "UUID!"
                     ]
                 }

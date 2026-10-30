@@ -70,6 +70,20 @@ export class AgentChatThreadService {
     return savedThread;
   }
 
+  async createUnownedChannelThread(
+    args: Parameters<AgentChatSharingService['createUnownedChannelThread']>[0],
+  ): Promise<AgentChatThreadWorkspaceEntity> {
+    const savedThread =
+      await this.sharingService.createUnownedChannelThread(args);
+
+    await this.threadRecordEventService.emitThreadCreated({
+      workspaceId: args.workspaceId,
+      threadId: savedThread.id,
+    });
+
+    return savedThread;
+  }
+
   // The client picks a new chat's id, so its first message creates the thread.
   // An existing thread is left for the caller to check access to.
   async createThreadIfMissing({
@@ -364,9 +378,7 @@ export class AgentChatThreadService {
     );
 
     const thread = await this.getWritableThread(args);
-    const candidateMemberIds = [
-      ...new Set(participantWorkspaceMemberIds),
-    ].filter((memberId) => memberId !== args.workspaceMemberId);
+    const candidateMemberIds = [...new Set(participantWorkspaceMemberIds)];
 
     if (candidateMemberIds.length === 0) {
       return [];
@@ -577,21 +589,26 @@ export class AgentChatThreadService {
   }
 
   // The message is already sent, so a mention that cannot be applied leaves the
-  // member out rather than failing the send
+  // member out rather than failing the send. The sender mentioning themselves
+  // owes themselves nothing
   async addMentionedParticipants({
     mentionedWorkspaceMemberIds,
     ...args
   }: AgentChatThreadAccessArgs & {
     mentionedWorkspaceMemberIds: string[];
   }): Promise<string[]> {
-    if (mentionedWorkspaceMemberIds.length === 0) {
+    const participantWorkspaceMemberIds = mentionedWorkspaceMemberIds.filter(
+      (memberId) => memberId !== args.workspaceMemberId,
+    );
+
+    if (participantWorkspaceMemberIds.length === 0) {
       return [];
     }
 
     try {
       return await this.mentionParticipants({
         ...args,
-        participantWorkspaceMemberIds: mentionedWorkspaceMemberIds,
+        participantWorkspaceMemberIds,
       });
     } catch (error) {
       this.logger.error(

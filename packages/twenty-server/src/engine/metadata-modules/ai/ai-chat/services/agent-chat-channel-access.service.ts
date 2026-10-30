@@ -92,9 +92,42 @@ export class AgentChatChannelAccessService {
       });
     }
 
-    const { defaultRoleId } = authContext.application;
+    return this.findRole({
+      workspaceId,
+      roleId: authContext.application.defaultRoleId,
+    });
+  }
 
-    if (!isDefined(defaultRoleId)) {
+  async assertChannelOpenToRole({
+    workspaceId,
+    channelId,
+    roleId,
+  }: {
+    workspaceId: string;
+    channelId: string;
+    roleId: string | null;
+  }): Promise<void> {
+    const [channel, role] = await Promise.all([
+      this.channelMetadataService.findChannelOrThrow({
+        workspaceId,
+        channelId,
+      }),
+      this.findRole({ workspaceId, roleId }),
+    ]);
+
+    if (!isAgentChatChannelOpenToRole({ channel, role })) {
+      throwAgentChatChannelNotFound();
+    }
+  }
+
+  private async findRole({
+    workspaceId,
+    roleId,
+  }: {
+    workspaceId: string;
+    roleId: string | null | undefined;
+  }): Promise<FlatRole | undefined> {
+    if (!isDefined(roleId)) {
       return undefined;
     }
 
@@ -104,7 +137,7 @@ export class AgentChatChannelAccessService {
     );
 
     return findFlatEntityByIdInFlatEntityMaps({
-      flatEntityId: defaultRoleId,
+      flatEntityId: roleId,
       flatEntityMaps: flatRoleMaps,
     });
   }

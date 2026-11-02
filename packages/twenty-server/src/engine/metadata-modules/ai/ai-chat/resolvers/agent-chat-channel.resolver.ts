@@ -1,3 +1,4 @@
+import { msg } from '@lingui/core/macro';
 import { UseFilters, UseGuards, UseInterceptors } from '@nestjs/common';
 import {
   Args,
@@ -285,6 +286,9 @@ export class AgentChatChannelResolver {
 
     throw new ForbiddenError(
       'A workspace member or an application must make this request',
+      {
+        userFriendlyMessage: msg`Sign in as a workspace member or use an application token to make this request.`,
+      },
     );
   }
 }

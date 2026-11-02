@@ -84,7 +84,7 @@ const MARK_THREAD_DONE = parse(
   `mutation MarkThreadDone($threadId: UUID!) { markAgentChatThreadAsDoneInChannel(threadId: $threadId) }`,
 );
 
-const setupApplicationUnderTest = async ({
+const setupApplicationUnderTestOrThrow = async ({
   name,
   permissionFlagUniversalIdentifiers,
 }: {
@@ -137,7 +137,7 @@ const findGeneralChannelId = async (): Promise<string> => {
   return id;
 };
 
-const findWorkspaceCustomApplicationId = async (): Promise<string> => {
+const findWorkspaceCustomApplicationIdOrThrow = async (): Promise<string> => {
   const { workspaceCustomApplicationId } =
     await getCoreRepository<WorkspaceEntity>(WorkspaceEntity).findOneOrFail({
       select: { workspaceCustomApplicationId: true },
@@ -174,21 +174,6 @@ const readChannelRoleApplicationIds = async (
     where: { channelId, workspaceId: SEED_APPLE_WORKSPACE_ID },
     order: { roleId: 'ASC' },
   });
-
-const readThreadChannelId = async (threadId: string): Promise<string> => {
-  const thread = await global.testDataSource
-    .createQueryBuilder()
-    .select('thread."channelId"', 'channelId')
-    .from(`${SCHEMA}.agentChatThread`, 'thread')
-    .where('thread.id = :threadId', { threadId })
-    .getRawOne<{ channelId: string }>();
-
-  if (!isDefined(thread)) {
-    throw new Error('Chat thread not found');
-  }
-
-  return thread.channelId;
-};
 
 const readThreadChannelState = (threadId: string) =>
   global.testDataSource
@@ -341,15 +326,15 @@ describe('Inbox channels managed by an application', () => {
   };
 
   beforeAll(async () => {
-    channelManager = await setupApplicationUnderTest({
+    channelManager = await setupApplicationUnderTestOrThrow({
       name: 'Channel Manager Application',
       permissionFlagUniversalIdentifiers: CHANNEL_MANAGER_PERMISSION_FLAGS,
     });
-    otherChannelManager = await setupApplicationUnderTest({
+    otherChannelManager = await setupApplicationUnderTestOrThrow({
       name: 'Other Channel Manager Application',
       permissionFlagUniversalIdentifiers: CHANNEL_MANAGER_PERMISSION_FLAGS,
     });
-    channelReader = await setupApplicationUnderTest({
+    channelReader = await setupApplicationUnderTestOrThrow({
       name: 'Channel Reader Application',
       permissionFlagUniversalIdentifiers: [SystemPermissionFlag.AI],
     });
@@ -620,7 +605,9 @@ describe('Inbox channels managed by an application', () => {
       code: 'NOT_FOUND',
       subCode: AiExceptionCode.CHAT_CHANNEL_NOT_FOUND,
     });
-    expect(await readThreadChannelId(threadId)).toBe(channelId);
+    expect(await readThreadChannelState(threadId)).toMatchObject({
+      channelId: channelId,
+    });
 
     assertGraphQLSuccessfulResponse(
       await deleteChannel({
@@ -629,7 +616,9 @@ describe('Inbox channels managed by an application', () => {
         destinationChannelId,
       }),
     );
-    expect(await readThreadChannelId(threadId)).toBe(destinationChannelId);
+    expect(await readThreadChannelState(threadId)).toMatchObject({
+      channelId: destinationChannelId,
+    });
     expect(await readChannelGrants(threadId)).toEqual([
       { principalType: 'ROLE', sourceId: destinationChannelId },
     ]);
@@ -637,7 +626,7 @@ describe('Inbox channels managed by an application', () => {
 
   it('keeps member behaviour on channels, including those an application owns', async () => {
     const workspaceCustomApplicationId =
-      await findWorkspaceCustomApplicationId();
+      await findWorkspaceCustomApplicationIdOrThrow();
     const universalIdentifier = randomUUID();
     const memberChannelId = await createChannelOrThrow({
       input: { name: buildChannelName(), universalIdentifier },
@@ -778,7 +767,7 @@ describe('Uninstalling an application that created inbox channels', () => {
   let uninstalledApplication: ApplicationUnderTest;
 
   beforeAll(async () => {
-    uninstalledApplication = await setupApplicationUnderTest({
+    uninstalledApplication = await setupApplicationUnderTestOrThrow({
       name: 'Uninstalled Channel Application',
       permissionFlagUniversalIdentifiers: CHANNEL_MANAGER_PERMISSION_FLAGS,
     });
@@ -900,7 +889,9 @@ describe('Uninstalling an application that created inbox channels', () => {
     expect(await readChannelApplicationId(channelId)).toBeUndefined();
 
     for (const movedThreadId of [threadId, lateThreadId]) {
-      expect(await readThreadChannelId(movedThreadId)).toBe(generalChannelId);
+      expect(await readThreadChannelState(movedThreadId)).toMatchObject({
+        channelId: generalChannelId,
+      });
       expect(await readChannelGrants(movedThreadId)).toEqual([
         { principalType: 'ROLE', sourceId: generalChannelId },
       ]);

@@ -1457,6 +1457,59 @@ describe('Chat channels through the authenticated API', () => {
     expect(hasEmittedThreadEvent(threadId)).toBe(true);
   });
 
+  it('keeps a conversation moved out while its former channel is being deleted', async () => {
+    const sourceChannelId = await createChannel();
+    const destinationChannelId = await createChannel();
+    const otherChannelId = await createChannel();
+    const threadId = await createThreadInChannel(sourceChannelId);
+    const queryRunner = await startHeldTransaction();
+    const [{ processId }]: { processId: number }[] = await queryRunner.query(
+      'SELECT pg_backend_pid() AS "processId"',
+    );
+
+    await queryRunner.query(
+      'SELECT id FROM core."agentChatChannel" WHERE id = $1 FOR UPDATE',
+      [destinationChannelId],
+    );
+
+    const pendingDeleteResponse = Promise.resolve(
+      makeMetadataApiRequest({
+        query: DELETE_CHANNEL,
+        variables: {
+          channelId: sourceChannelId,
+          destinationChannelId,
+        },
+      }),
+    );
+
+    try {
+      await expectEventually(async () => {
+        const [{ isWaiting }]: { isWaiting: boolean }[] =
+          await global.testDataSource.query(
+            'SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))) AS "isWaiting"',
+            [processId],
+          );
+
+        expect(isWaiting).toBe(true);
+      });
+
+      assertGraphQLSuccessfulResponse(
+        await makeMetadataApiRequest({
+          query: MOVE_THREAD,
+          variables: { threadId, channelId: otherChannelId },
+        }),
+      );
+    } finally {
+      await queryRunner.commitTransaction();
+    }
+
+    assertGraphQLSuccessfulResponse(await pendingDeleteResponse);
+    expect((await readChannelState(threadId)).channelId).toBe(otherChannelId);
+    expect(await readChannelGrants(threadId)).toEqual([
+      { principalType: 'ROLE', sourceId: otherChannelId },
+    ]);
+  });
+
   it('refuses chats in a channel while it is being deleted', async () => {
     const channelId = await createChannel();
     const threadId = await createThreadInChannel(null);

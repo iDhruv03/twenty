@@ -6,6 +6,7 @@ import { PostgresAdvisoryLockService } from 'src/database/typeorm/postgres-advis
 import { type FlatApplication } from 'src/engine/core-modules/application/types/flat-application.type';
 import { getScopedCallingApplication } from 'src/engine/core-modules/application/utils/get-scoped-calling-application.util';
 import { isApplicationAuthContext } from 'src/engine/core-modules/auth/guards/is-application-auth-context.guard';
+import { AgentChatChannelEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel.entity';
 import { AgentChatChannelMetadataService } from 'src/engine/metadata-modules/agent-chat-channel/services/agent-chat-channel-metadata.service';
 import { type FlatAgentChatChannelWithRoleIds } from 'src/engine/metadata-modules/agent-chat-channel/types/flat-agent-chat-channel-with-role-ids.type';
 import { type AgentChatChannelRoleDTO } from 'src/engine/metadata-modules/ai/ai-chat/dtos/agent-chat-channel-role.dto';
@@ -13,7 +14,6 @@ import { AgentChatChannelAccessService } from 'src/engine/metadata-modules/ai/ai
 import { AgentChatChannelGrantService } from 'src/engine/metadata-modules/ai/ai-chat/services/agent-chat-channel-grant.service';
 import { AgentChatSharingService } from 'src/engine/metadata-modules/ai/ai-chat/services/agent-chat-sharing.service';
 import { type AgentInboxCallerAuthContext } from 'src/engine/metadata-modules/ai/ai-chat/types/agent-inbox-caller-auth-context.type';
-import { assertAgentChatChannelExists } from 'src/engine/metadata-modules/ai/ai-chat/utils/assert-agent-chat-channel-exists.util';
 import { buildAgentChatChannelDeletionLockKey } from 'src/engine/metadata-modules/ai/ai-chat/utils/build-agent-chat-channel-deletion-lock-key.util';
 import { isAgentChatChannelOpenToRole } from 'src/engine/metadata-modules/ai/ai-chat/utils/is-agent-chat-channel-open-to-role.util';
 import { lockAgentChatChannelForThreadWriteOrThrow } from 'src/engine/metadata-modules/ai/ai-chat/utils/lock-agent-chat-channel-for-thread-write-or-throw.util';
@@ -270,7 +270,13 @@ export class AgentChatChannelService {
     }[]
   > {
     return this.threadRepository.query(workspaceId, async ({ manager }) => {
-      await assertAgentChatChannelExists({ manager, workspaceId, channelId });
+      const doesSourceChannelExist = await manager
+        .getRepository(AgentChatChannelEntity)
+        .existsBy({ id: channelId, workspaceId });
+
+      if (!doesSourceChannelExist) {
+        throwAgentChatChannelNotFound();
+      }
 
       const threadTable = `${getWorkspaceSchemaName(workspaceId)}.agentChatThread`;
       const threadsBefore = await manager
@@ -278,7 +284,6 @@ export class AgentChatChannelService {
         .select('thread.*')
         .from(threadTable, 'thread')
         .where('thread."channelId" = :channelId', { channelId })
-        .setLock('for_no_key_update')
         .getRawMany<AgentChatThreadWorkspaceEntity>();
 
       if (!isNonEmptyArray(threadsBefore)) {
@@ -307,6 +312,9 @@ export class AgentChatChannelService {
         })
         .where('id = ANY(:threadIds::uuid[])', {
           threadIds: threadsBefore.map(({ id }) => id),
+        })
+        .andWhere('"channelId" = :sourceChannelId', {
+          sourceChannelId: channelId,
         })
         .returning('*')
         .execute();

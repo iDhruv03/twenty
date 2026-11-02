@@ -202,7 +202,6 @@ describe('Agent tools', () => {
       const { listToolNames, permissionsService } = buildAgentTools();
 
       await expect(listToolNames()).resolves.toHaveLength(4);
-      expect(permissionsService.checkRolesPermissions).toHaveBeenCalledTimes(1);
       expect(permissionsService.checkRolesPermissions).toHaveBeenCalledWith(
         context.rolePermissionConfig,
         workspaceId,

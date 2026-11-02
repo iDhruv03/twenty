@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { parse } from 'graphql';
 import { type DataSource } from 'typeorm';
+import { lockAgentChatChannelForThreadWriteInTestOrThrow } from 'test/integration/ai/utils/lock-agent-chat-channel-for-thread-write-in-test-or-throw.util';
 import { SystemPermissionFlag } from 'twenty-shared/constants';
 import { isDefined } from 'twenty-shared/utils';
 
@@ -23,7 +24,6 @@ import { ApplicationEntity } from 'src/engine/core-modules/application/applicati
 import { WorkspaceEntity } from 'src/engine/core-modules/workspace/workspace.entity';
 import { AgentChatChannelRoleEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel-role.entity';
 import { AgentChatChannelEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel.entity';
-import { lockAgentChatChannelForThreadWriteOrThrow } from 'src/engine/metadata-modules/ai/ai-chat/utils/lock-agent-chat-channel-for-thread-write-or-throw.util';
 import { AiExceptionCode } from 'src/engine/metadata-modules/ai/ai.exception';
 import { getWorkspaceSchemaName } from 'src/engine/workspace-datasource/utils/get-workspace-schema-name.util';
 import { SEED_APPLE_WORKSPACE_ID } from 'src/engine/workspace-manager/dev-seeder/core/constants/seeder-workspaces.constant';
@@ -902,7 +902,7 @@ describe('Uninstalling an application that created inbox channels', () => {
           'SELECT pg_backend_pid() AS "backendProcessId"',
         );
 
-      await lockAgentChatChannelForThreadWriteOrThrow({
+      await lockAgentChatChannelForThreadWriteInTestOrThrow({
         manager: queryRunner.manager,
         workspaceId: SEED_APPLE_WORKSPACE_ID,
         channelId,

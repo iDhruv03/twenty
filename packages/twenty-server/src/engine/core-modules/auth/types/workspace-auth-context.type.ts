@@ -26,7 +26,7 @@ export interface UserWorkspaceAuthContext extends BaseWorkspaceAuthContext {
   workspaceMemberId: NonNullable<RawAuthContext['workspaceMemberId']>;
   workspaceMember: NonNullable<RawAuthContext['workspaceMember']>;
   // Taken from the request token; contexts rebuilt outside a request are standard
-  sessionVariant: UserSessionVariant;
+  userSessionVariant: UserSessionVariant;
   application?: NonNullable<RawAuthContext['application']>;
   viaApplication?: NonNullable<RawAuthContext['application']>;
   agentId?: string;

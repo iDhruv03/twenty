@@ -86,7 +86,7 @@ const context: ToolProviderContext = {
   },
   authContext: {
     type: 'user',
-    sessionVariant: 'standard',
+    userSessionVariant: 'standard',
   } as UserWorkspaceAuthContext,
   userWorkspaceId: callerUserWorkspaceId,
   actorContext: {

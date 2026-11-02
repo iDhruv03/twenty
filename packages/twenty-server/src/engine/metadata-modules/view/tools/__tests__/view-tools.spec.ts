@@ -242,7 +242,7 @@ describe('View tools', () => {
       rolePermissionConfig: { shouldBypassPermissionChecks: true },
       authContext: {
         type: 'user',
-        sessionVariant: 'standard',
+        userSessionVariant: 'standard',
       } as UserWorkspaceAuthContext,
       actorContext: workspaceMemberId
         ? {

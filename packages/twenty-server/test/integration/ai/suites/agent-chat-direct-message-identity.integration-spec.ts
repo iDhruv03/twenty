@@ -147,7 +147,7 @@ describe('Canonical direct message identity', () => {
 
   it('keeps new identities private when record privacy is enabled', async () => {
     const featureFlag = FeatureFlagKey.IS_PRIVATE_RECORD_ENABLED;
-    const wasPrivateRecordEnabled =
+    const isPrivateRecordInitiallyEnabled =
       await context.featureFlagService.isFeatureEnabled(
         featureFlag,
         context.workspaceId,
@@ -173,7 +173,7 @@ describe('Canonical direct message identity', () => {
       await context.featureFlagService.upsertWorkspaceFeatureFlag({
         workspaceId: context.workspaceId,
         featureFlag,
-        value: wasPrivateRecordEnabled,
+        value: isPrivateRecordInitiallyEnabled,
       });
     }
   });

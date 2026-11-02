@@ -533,7 +533,6 @@ export class AgentChatSharingService {
     );
   }
 
-  // No owner: only the channel's role grants give access
   async createUnownedChannelThread({
     workspaceId,
     id,

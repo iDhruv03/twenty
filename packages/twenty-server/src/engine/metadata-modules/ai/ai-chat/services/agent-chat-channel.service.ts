@@ -5,7 +5,6 @@ import { isDefined, isNonEmptyArray } from 'twenty-shared/utils';
 import { PostgresAdvisoryLockService } from 'src/database/typeorm/postgres-advisory-lock.service';
 import { type FlatApplication } from 'src/engine/core-modules/application/types/flat-application.type';
 import { getScopedCallingApplication } from 'src/engine/core-modules/application/utils/get-scoped-calling-application.util';
-import { isApplicationAuthContext } from 'src/engine/core-modules/auth/guards/is-application-auth-context.guard';
 import { AgentChatChannelEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel.entity';
 import { AgentChatChannelMetadataService } from 'src/engine/metadata-modules/agent-chat-channel/services/agent-chat-channel-metadata.service';
 import { type FlatAgentChatChannelWithRoleIds } from 'src/engine/metadata-modules/agent-chat-channel/types/flat-agent-chat-channel-with-role-ids.type';
@@ -243,9 +242,12 @@ export class AgentChatChannelService {
       workspaceId: authContext.workspace.id,
       channelId,
     });
+    const callingApplication = getScopedCallingApplication(
+      authContext.application,
+    );
     const isChannelNotOwnedByApplicationCaller =
-      isApplicationAuthContext(authContext) &&
-      channel.applicationId !== authContext.application.id;
+      isDefined(callingApplication) &&
+      channel.applicationId !== callingApplication.id;
 
     if (isChannelNotOwnedByApplicationCaller) {
       throwAgentChatChannelNotFound();

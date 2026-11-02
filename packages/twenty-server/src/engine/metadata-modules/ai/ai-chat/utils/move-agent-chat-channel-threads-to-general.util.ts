@@ -55,7 +55,7 @@ export const moveAgentChatChannelThreadsToGeneral = async ({
     .where('"channelId" = :channelId', { channelId })
     .returning('id')
     .execute();
-  const movedThreads = movedThreadsResult.raw as { id: string }[];
+  const movedThreads: { id: string }[] = movedThreadsResult.raw;
 
   if (!isNonEmptyArray(movedThreads)) {
     return;

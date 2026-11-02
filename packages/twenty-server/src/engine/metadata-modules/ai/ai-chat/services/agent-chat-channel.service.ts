@@ -310,7 +310,7 @@ export class AgentChatChannelService {
         })
         .returning('*')
         .execute();
-      const threadsAfter = movedThreads.raw as AgentChatThreadWorkspaceEntity[];
+      const threadsAfter: AgentChatThreadWorkspaceEntity[] = movedThreads.raw;
 
       await this.channelGrantService.rewriteThreadGrantsInTransaction({
         manager,

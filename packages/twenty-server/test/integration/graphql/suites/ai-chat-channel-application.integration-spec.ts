@@ -4,6 +4,7 @@ import { parse } from 'graphql';
 import { SystemPermissionFlag } from 'twenty-shared/constants';
 import { isDefined } from 'twenty-shared/utils';
 
+import { waitForBlockedDatabaseQueryOrThrow } from 'test/integration/ai/utils/wait-for-blocked-database-query-or-throw.util';
 import { assertGraphQLSuccessfulResponse } from 'test/integration/graphql/utils/graphql-test-assertions.util';
 import { cleanupApplicationAndAppRegistration } from 'test/integration/metadata/suites/application/utils/cleanup-application-and-app-registration.util';
 import {
@@ -13,7 +14,6 @@ import {
 import { uninstallApplication } from 'test/integration/metadata/suites/application/utils/uninstall-application.util';
 import { makeMetadataApiRequest } from 'test/integration/metadata/suites/utils/make-metadata-api-request.util';
 import { destroyAgentChatThread } from 'test/integration/utils/destroy-agent-chat-thread.util';
-import { expectEventually } from 'test/integration/utils/expect-eventually.util';
 import { generateApplicationTokenPair } from 'test/integration/utils/generate-application-token-pair.util';
 import { getCoreRepository } from 'test/integration/utils/get-core-repository.util';
 
@@ -256,20 +256,6 @@ const readChannelGrantRoleIds = async (threadId: string): Promise<string[]> =>
       .orderBy('record_share."principalId"')
       .getRawMany<{ principalId: string }>()
   ).map(({ principalId }) => principalId);
-
-const countSessionsWaitingOnLocks = async (): Promise<number> => {
-  const sessionCount = await global.testDataSource
-    .createQueryBuilder()
-    .select('count(*)::int', 'count')
-    .from('pg_stat_activity', 'session')
-    .where('session.datname = current_database()')
-    .andWhere('session.wait_event_type = :waitEventType', {
-      waitEventType: 'Lock',
-    })
-    .getRawOne<{ count: number }>();
-
-  return sessionCount?.count ?? 0;
-};
 
 const listChannels = async (token: string): Promise<ListedChannel[]> => {
   const response = await makeMetadataApiRequest({ query: CHANNELS }, token);
@@ -965,6 +951,11 @@ describe('Uninstalling an application that created inbox channels', () => {
     await queryRunner.startTransaction();
 
     try {
+      const [{ backendProcessId }]: { backendProcessId: number }[] =
+        await queryRunner.query(
+          'SELECT pg_backend_pid() AS "backendProcessId"',
+        );
+
       await lockAgentChatChannelForThreadWriteOrThrow({
         manager: queryRunner.manager,
         workspaceId: SEED_APPLE_WORKSPACE_ID,
@@ -982,9 +973,7 @@ describe('Uninstalling an application that created inbox channels', () => {
           uninstalledApplication.application.universalIdentifier,
       });
 
-      await expectEventually(async () =>
-        expect(await countSessionsWaitingOnLocks()).toBeGreaterThan(0),
-      );
+      await waitForBlockedDatabaseQueryOrThrow(backendProcessId);
       await queryRunner.commitTransaction();
 
       return await uninstallResponse;

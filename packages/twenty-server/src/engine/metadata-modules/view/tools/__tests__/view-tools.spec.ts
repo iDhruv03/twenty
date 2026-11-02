@@ -10,6 +10,7 @@ import {
   ViewVisibility,
 } from 'twenty-shared/types';
 
+import { type UserWorkspaceAuthContext } from 'src/engine/core-modules/auth/types/workspace-auth-context.type';
 import { type BaseTool } from 'src/engine/core-modules/tool-provider/interfaces/base-tool.interface';
 import { type ToolProviderContext } from 'src/engine/core-modules/tool-provider/interfaces/tool-provider-context.type';
 import { WorkspaceManyOrAllFlatEntityMapsCacheService } from 'src/engine/metadata-modules/flat-entity/services/workspace-many-or-all-flat-entity-maps-cache.service';
@@ -239,7 +240,10 @@ describe('View tools', () => {
       workspaceId,
       userWorkspaceId,
       rolePermissionConfig: { shouldBypassPermissionChecks: true },
-      authPrincipalVariant: { kind: 'userSession', variant: 'standard' },
+      authContext: {
+        type: 'user',
+        sessionVariant: 'standard',
+      } as UserWorkspaceAuthContext,
       actorContext: workspaceMemberId
         ? {
             source: FieldActorSource.MANUAL,

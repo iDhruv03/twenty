@@ -5,6 +5,7 @@ import {
 } from 'twenty-shared/types';
 
 import { type ApplicationService } from 'src/engine/core-modules/application/application.service';
+import { type UserWorkspaceAuthContext } from 'src/engine/core-modules/auth/types/workspace-auth-context.type';
 import { type ToolProviderContext } from 'src/engine/core-modules/tool-provider/interfaces/tool-provider-context.type';
 import { type ObjectPermissionService } from 'src/engine/metadata-modules/object-permission/object-permission.service';
 import { type RoleService } from 'src/engine/metadata-modules/role/role.service';
@@ -83,7 +84,10 @@ const context: ToolProviderContext = {
   rolePermissionConfig: {
     intersectionOf: { userWorkspaceRoleId: callerRoleId },
   },
-  authPrincipalVariant: { kind: 'userSession', variant: 'standard' },
+  authContext: {
+    type: 'user',
+    sessionVariant: 'standard',
+  } as UserWorkspaceAuthContext,
   userWorkspaceId: callerUserWorkspaceId,
   actorContext: {
     source: FieldActorSource.MANUAL,

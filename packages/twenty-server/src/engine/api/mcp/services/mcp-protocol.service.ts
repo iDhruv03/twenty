@@ -71,7 +71,6 @@ import {
 } from 'src/engine/permissions/principal/types/role-permission-config.type';
 import { buildAgentRoleIdsBySource } from 'src/engine/permissions/principal/utils/build-agent-role-ids-by-source.util';
 import { buildUserRoleIdsBySource } from 'src/engine/permissions/principal/utils/build-user-role-ids-by-source.util';
-import { type AuthPrincipalVariant } from 'src/engine/guards/types/auth-principal-variant.type';
 import { WorkspaceManyOrAllFlatEntityMapsCacheService } from 'src/engine/metadata-modules/flat-entity/services/workspace-many-or-all-flat-entity-maps-cache.service';
 import { SkillService } from 'src/engine/metadata-modules/skill/skill.service';
 import { UserRoleService } from 'src/engine/permissions/role-assignment/user-role.service';
@@ -128,7 +127,7 @@ export class McpProtocolService {
       await this.mcpInstructionBuilderService.buildInstructions({
         workspaceId: context.workspace.id,
         rolePermissionConfig,
-        authPrincipalVariant: context.authPrincipalVariant,
+        authContext: context.authContext,
         isDirectMode: context.isDirectMode,
       });
 
@@ -281,7 +280,6 @@ export class McpProtocolService {
     rolePermissionConfig: RolePermissionConfig,
     options: {
       authContext?: WorkspaceAuthContext;
-      authPrincipalVariant: AuthPrincipalVariant | undefined;
       userId?: string;
       userWorkspaceId?: string;
       apiKey?: FlatApiKey;
@@ -299,7 +297,6 @@ export class McpProtocolService {
       workspaceId: workspace.id,
       rolePermissionConfig,
       authContext: options?.authContext,
-      authPrincipalVariant: options.authPrincipalVariant,
       application: options?.application,
       userId: options?.userId,
       userWorkspaceId: options?.userWorkspaceId,
@@ -317,7 +314,6 @@ export class McpProtocolService {
       [GET_TOOL_CATALOG_TOOL_NAME]: {
         ...createGetToolCatalogTool(this.toolRegistry, workspace.id, {
           rolePermissionConfig,
-          authPrincipalVariant: options.authPrincipalVariant,
           userId: options?.userId,
           userWorkspaceId: options?.userWorkspaceId,
           excludeTools: MCP_EXCLUDED_TOOL_NAMES,
@@ -524,7 +520,6 @@ export class McpProtocolService {
       () =>
         this.buildMcpToolSet(context.workspace, rolePermissionConfig, {
           authContext: context.authContext,
-          authPrincipalVariant: context.authPrincipalVariant,
           application: context.application,
           userId: context.userId,
           userWorkspaceId: context.userWorkspaceId,

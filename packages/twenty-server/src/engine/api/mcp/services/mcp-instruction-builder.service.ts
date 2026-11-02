@@ -5,8 +5,8 @@ import { camelToSnakeCase } from 'twenty-shared/utils';
 
 import { MCP_EXCLUDED_TOOL_NAMES } from 'src/engine/api/mcp/constants/mcp-excluded-tool-names.constant';
 import { buildMcpServerInstructions } from 'src/engine/api/mcp/utils/build-mcp-server-instructions.util';
+import { type WorkspaceAuthContext } from 'src/engine/core-modules/auth/types/workspace-auth-context.type';
 import { ToolRegistryService } from 'src/engine/core-modules/tool-provider/services/tool-registry.service';
-import { type AuthPrincipalVariant } from 'src/engine/guards/types/auth-principal-variant.type';
 import { getDatabaseCrudToolFlatObjects } from 'src/engine/metadata-modules/ai/ai-agent/utils/get-database-crud-tool-flat-objects.util';
 import { WorkspaceManyOrAllFlatEntityMapsCacheService } from 'src/engine/metadata-modules/flat-entity/services/workspace-many-or-all-flat-entity-maps-cache.service';
 import { SkillService } from 'src/engine/metadata-modules/skill/skill.service';
@@ -23,12 +23,12 @@ export class McpInstructionBuilderService {
   async buildInstructions({
     workspaceId,
     rolePermissionConfig,
-    authPrincipalVariant,
+    authContext,
     isDirectMode,
   }: {
     workspaceId: string;
     rolePermissionConfig: RolePermissionConfig;
-    authPrincipalVariant: AuthPrincipalVariant | undefined;
+    authContext: WorkspaceAuthContext;
     isDirectMode: boolean;
   }): Promise<string> {
     const [{ flatObjectMetadataMaps }, allSkills, actionToolCatalog] =
@@ -40,7 +40,7 @@ export class McpInstructionBuilderService {
         this.skillService.findAllFlatSkills(workspaceId),
         this.toolRegistry.buildToolIndex(workspaceId, {
           rolePermissionConfig,
-          authPrincipalVariant,
+          authContext,
           categories: [ToolCategory.ACTION],
         }),
       ]);

@@ -1,3 +1,4 @@
+import { getWorkspaceAuthContext } from 'src/engine/core-modules/auth/storage/workspace-auth-context.storage';
 import { InjectAgentHistoryRepository } from 'src/engine/metadata-modules/ai/ai-history/repositories/inject-agent-history-repository.decorator';
 import { AgentHistoryRepository } from 'src/engine/metadata-modules/ai/ai-history/repositories/agent-history-repository';
 import { Injectable } from '@nestjs/common';
@@ -33,7 +34,7 @@ export class AiWorkspaceStatsService {
         rolePermissionConfig: {
           intersectionOf: { userWorkspaceRoleId: userRoleId },
         },
-        authPrincipalVariant: { kind: 'userSession', variant: 'standard' },
+        authContext: getWorkspaceAuthContext(),
       }),
     ]);
 

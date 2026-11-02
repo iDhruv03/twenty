@@ -154,12 +154,17 @@ export const replaceAgentChatChannelRuleGrants = async ({
         'rowCause',
       ])
       .values(
-        channelRuleGrantBatch.map((channelRuleGrant) => ({
-          ...channelRuleGrant,
-          principalType: 'ROLE',
-          accessLevel: 'READ_WRITE',
-          rowCause: 'RULE',
-        })),
+        channelRuleGrantBatch.map(
+          ({ objectMetadataId, recordId, principalId, sourceId }) => ({
+            objectMetadataId,
+            recordId,
+            principalId,
+            sourceId,
+            principalType: 'ROLE',
+            accessLevel: 'READ_WRITE',
+            rowCause: 'RULE',
+          }),
+        ),
       )
       .orIgnore()
       .execute();

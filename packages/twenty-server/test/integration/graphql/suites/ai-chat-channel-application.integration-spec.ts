@@ -39,6 +39,12 @@ const CHANNEL_MANAGER_PERMISSION_FLAGS = [
   SystemPermissionFlag.AI_SETTINGS,
 ];
 
+type ChannelInput = {
+  name: string;
+  roleIds?: string[];
+  universalIdentifier?: string;
+};
+
 type ListedChannel = {
   id: string;
   name: string;
@@ -284,7 +290,7 @@ describe('Inbox channels managed by an application', () => {
     input,
     token,
   }: {
-    input: { name: string; roleIds?: string[]; universalIdentifier?: string };
+    input: ChannelInput;
     token: string;
   }): Promise<string> => {
     const response = await createChannel({ input, token });
@@ -885,7 +891,7 @@ describe('Uninstalling an application that created inbox channels', () => {
     input,
     token,
   }: {
-    input: { name: string; roleIds?: string[]; universalIdentifier?: string };
+    input: ChannelInput;
     token: string;
   }): Promise<string> => {
     const response = await makeMetadataApiRequest(

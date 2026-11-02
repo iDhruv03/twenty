@@ -4,10 +4,12 @@ import { createChatParticipationTestContext } from 'test/integration/ai/utils/cr
 import { makeGraphqlApiRequest } from 'test/integration/graphql/utils/make-graphql-api-request.util';
 import { updateOneOperationFactory } from 'test/integration/graphql/utils/update-one-operation-factory.util';
 import { getAppProviderByClassName } from 'test/integration/utils/get-app-provider-by-class-name.util';
+import { FeatureFlagKey } from 'twenty-shared/types';
 
 import { ErrorCode } from 'src/engine/core-modules/graphql/utils/graphql-errors.util';
 import { type AgentChatDirectMessageIdentityService } from 'src/engine/metadata-modules/ai/ai-chat/services/agent-chat-direct-message-identity.service';
 import { AiExceptionCode } from 'src/engine/metadata-modules/ai/ai.exception';
+import { IS_PRIVATE_COLUMN_NAME } from 'src/engine/permissions/private-record/constants/is-private-column-name.constant';
 import { getWorkspaceSchemaName } from 'src/engine/workspace-datasource/utils/get-workspace-schema-name.util';
 import { SEED_YCOMBINATOR_WORKSPACE_ID } from 'src/engine/workspace-manager/dev-seeder/core/constants/seeder-workspaces.constant';
 import { USER_DATA_SEED_IDS } from 'src/engine/workspace-manager/dev-seeder/core/utils/seed-users.util';
@@ -139,6 +141,39 @@ describe('Canonical direct message identity', () => {
         )
         .where('id = :threadId', { threadId: otherWorkspacePair })
         .execute();
+    }
+  });
+
+  it('keeps new identities private when record privacy is enabled', async () => {
+    const featureFlag = FeatureFlagKey.IS_PRIVATE_RECORD_ENABLED;
+    const wasPrivateRecordEnabled =
+      await context.featureFlagService.isFeatureEnabled(
+        featureFlag,
+        context.workspaceId,
+      );
+
+    try {
+      await context.featureFlagService.upsertWorkspaceFeatureFlag({
+        workspaceId: context.workspaceId,
+        featureFlag,
+        value: true,
+      });
+
+      const threadId = await getOrCreate();
+      const identity = await global.testDataSource
+        .createQueryBuilder()
+        .select(`thread."${IS_PRIVATE_COLUMN_NAME}"`, 'isPrivate')
+        .from(`${context.schema}.agentChatThread`, 'thread')
+        .where('thread.id = :threadId', { threadId })
+        .getRawOne<{ isPrivate: boolean }>();
+
+      expect(identity).toEqual({ isPrivate: true });
+    } finally {
+      await context.featureFlagService.upsertWorkspaceFeatureFlag({
+        workspaceId: context.workspaceId,
+        featureFlag,
+        value: wasPrivateRecordEnabled,
+      });
     }
   });
 

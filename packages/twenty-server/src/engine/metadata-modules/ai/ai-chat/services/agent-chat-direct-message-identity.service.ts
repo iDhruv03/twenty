@@ -14,6 +14,8 @@ import {
   AiException,
   AiExceptionCode,
 } from 'src/engine/metadata-modules/ai/ai.exception';
+import { IS_PRIVATE_COLUMN_NAME } from 'src/engine/permissions/private-record/constants/is-private-column-name.constant';
+import { isPrivateRecordEnabled } from 'src/engine/permissions/private-record/utils/is-private-record-enabled.util';
 import { WorkspaceCacheService } from 'src/engine/workspace-cache/services/workspace-cache.service';
 import { getWorkspaceSchemaName } from 'src/engine/workspace-datasource/utils/get-workspace-schema-name.util';
 
@@ -47,6 +49,11 @@ export class AgentChatDirectMessageIdentityService {
       return existingThreadId;
     }
 
+    const { featureFlagsMap } = await this.workspaceCacheService.getOrRecompute(
+      workspaceId,
+      ['featureFlagsMap'],
+    );
+
     const createdThreadId = await this.threadRepository.query(
       workspaceId,
       async ({ manager }) => {
@@ -64,6 +71,9 @@ export class AgentChatDirectMessageIdentityService {
             conversationType: 'DIRECT_MESSAGE',
             ...pair,
             isAssistantParticipant: false,
+            ...(isPrivateRecordEnabled(featureFlagsMap)
+              ? { [IS_PRIVATE_COLUMN_NAME]: true }
+              : {}),
           })
           .orIgnore()
           .returning('id')

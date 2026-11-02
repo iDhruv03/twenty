@@ -1,11 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
 import { parse } from 'graphql';
-import { type DataSource } from 'typeorm';
 import { SystemPermissionFlag } from 'twenty-shared/constants';
 import { isDefined } from 'twenty-shared/utils';
 
-import { waitForBlockedDatabaseQueryOrThrow } from 'test/integration/ai/utils/wait-for-blocked-database-query-or-throw.util';
 import { assertGraphQLSuccessfulResponse } from 'test/integration/graphql/utils/graphql-test-assertions.util';
 import { cleanupApplicationAndAppRegistration } from 'test/integration/metadata/suites/application/utils/cleanup-application-and-app-registration.util';
 import {
@@ -20,12 +18,11 @@ import { generateApplicationTokenPair } from 'test/integration/utils/generate-ap
 import { getAppProviderByClassName } from 'test/integration/utils/get-app-provider-by-class-name.util';
 import { getCoreRepository } from 'test/integration/utils/get-core-repository.util';
 
+import { type ApplicationSyncService } from 'src/engine/core-modules/application/application-manifest/application-sync.service';
 import { ApplicationEntity } from 'src/engine/core-modules/application/application.entity';
 import { WorkspaceEntity } from 'src/engine/core-modules/workspace/workspace.entity';
 import { AgentChatChannelRoleEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel-role.entity';
 import { AgentChatChannelEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel.entity';
-
-import { type ApplicationSyncService } from 'src/engine/core-modules/application/application-manifest/application-sync.service';
 import { AiExceptionCode } from 'src/engine/metadata-modules/ai/ai.exception';
 import { getWorkspaceSchemaName } from 'src/engine/workspace-datasource/utils/get-workspace-schema-name.util';
 import { SEED_APPLE_WORKSPACE_ID } from 'src/engine/workspace-manager/dev-seeder/core/constants/seeder-workspaces.constant';
@@ -859,7 +856,7 @@ describe('Uninstalling an application that created inbox channels', () => {
       name: 'Uninstalled Channel Application',
       permissionFlagUniversalIdentifiers: CHANNEL_MANAGER_PERMISSION_FLAGS,
     });
-    rolledBackApplication = await setupApplicationUnderTest({
+    rolledBackApplication = await setupApplicationUnderTestOrThrow({
       name: 'Rolled Back Channel Application',
       permissionFlagUniversalIdentifiers: CHANNEL_MANAGER_PERMISSION_FLAGS,
     });
@@ -925,7 +922,7 @@ describe('Uninstalling an application that created inbox channels', () => {
 
   it('keeps its channels with their chats as custom channels of the workspace, open to the roles it does not own', async () => {
     const workspaceCustomApplicationId =
-      await findWorkspaceCustomApplicationId();
+      await findWorkspaceCustomApplicationIdOrThrow();
     const { id: memberRoleId } = await findOneRoleByLabel({ label: 'Member' });
     const channelId = await createChannelOrThrow({
       input: {
@@ -960,7 +957,9 @@ describe('Uninstalling an application that created inbox channels', () => {
       applicationId: workspaceCustomApplicationId,
       roleIds: [memberRoleId],
     });
-    expect(await readThreadChannelId(threadId)).toBe(channelId);
+    expect(await readThreadChannelState(threadId)).toMatchObject({
+      channelId: channelId,
+    });
     expect(await readChannelGrants(threadId)).toEqual([
       { principalType: 'ROLE', sourceId: channelId },
     ]);
@@ -995,7 +994,9 @@ describe('Uninstalling an application that created inbox channels', () => {
     });
 
     expect(await readChannelApplicationId(channelId)).toBeUndefined();
-    expect(await readThreadChannelId(threadId)).toBe(generalChannelId);
+    expect(await readThreadChannelState(threadId)).toMatchObject({
+      channelId: generalChannelId,
+    });
     expect(await readChannelGrants(threadId)).toEqual([
       { principalType: 'ROLE', sourceId: generalChannelId },
     ]);

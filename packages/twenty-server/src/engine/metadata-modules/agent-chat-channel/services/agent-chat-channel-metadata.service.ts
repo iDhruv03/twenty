@@ -6,11 +6,13 @@ import {
   isNonEmptyArray,
   removeUndefinedFields,
 } from 'twenty-shared/utils';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import { v4 } from 'uuid';
 
 import { ApplicationService } from 'src/engine/core-modules/application/application.service';
 import { type FlatApplication } from 'src/engine/core-modules/application/types/flat-application.type';
+import { AgentChatChannelRoleEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel-role.entity';
+import { AgentChatChannelEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel.entity';
 import { addRoleIdsToFlatAgentChatChannel } from 'src/engine/metadata-modules/agent-chat-channel/utils/add-role-ids-to-flat-agent-chat-channel.util';
 import { assertAgentChatChannelOwnedByApplicationOrThrow } from 'src/engine/metadata-modules/agent-chat-channel/utils/assert-agent-chat-channel-owned-by-application-or-throw.util';
 import { buildAgentChatChannelRolesToCreate } from 'src/engine/metadata-modules/agent-chat-channel/utils/build-agent-chat-channel-roles-to-create.util';
@@ -28,6 +30,7 @@ import { type FlatEntityToCreateDeleteUpdate } from 'src/engine/metadata-modules
 import { findFlatEntityByUniversalIdentifier } from 'src/engine/metadata-modules/flat-entity/utils/find-flat-entity-by-universal-identifier.util';
 import { findManyFlatEntityByIdInFlatEntityMaps } from 'src/engine/metadata-modules/flat-entity/utils/find-many-flat-entity-by-id-in-flat-entity-maps.util';
 import { type FlatNavigationMenuItem } from 'src/engine/metadata-modules/flat-navigation-menu-item/types/flat-navigation-menu-item.type';
+import { RoleEntity } from 'src/engine/metadata-modules/role/role.entity';
 import { WorkspaceMigrationBuilderException } from 'src/engine/workspace-manager/workspace-migration/exceptions/workspace-migration-builder-exception';
 import { WorkspaceMigrationValidateBuildAndRunService } from 'src/engine/workspace-manager/workspace-migration/services/workspace-migration-validate-build-and-run-service';
 
@@ -307,28 +310,30 @@ export class AgentChatChannelMetadataService {
           mode: 'exclusive',
         });
 
-        await manager.query(
-          `DELETE FROM core."agentChatChannelRole" channel_role
-           USING core."role" application_role
-           WHERE channel_role."workspaceId" = $1
-             AND channel_role."channelId" = ANY($2::uuid[])
-             AND application_role.id = channel_role."roleId"
-             AND application_role."applicationId" = $3`,
-          [workspaceId, channelIds, applicationId],
-        );
-
-        await manager.query(
-          `UPDATE core."agentChatChannelRole"
-           SET "applicationId" = $4, "updatedAt" = now()
-           WHERE "workspaceId" = $1
-             AND "channelId" = ANY($2::uuid[])
-             AND "applicationId" = $3`,
-          [
+        const applicationRolesQuery = manager
+          .getRepository(RoleEntity)
+          .createQueryBuilder('application_role')
+          .select('application_role.id')
+          .where('application_role.workspaceId = :workspaceId', {
             workspaceId,
-            channelIds,
+          })
+          .andWhere('application_role.applicationId = :applicationId', {
             applicationId,
-            workspaceCustomFlatApplication.id,
-          ],
+          });
+
+        await manager
+          .getRepository(AgentChatChannelRoleEntity)
+          .createQueryBuilder()
+          .delete()
+          .where({ workspaceId, channelId: In(channelIds) })
+          .andWhere(`"roleId" IN (${applicationRolesQuery.getQuery()})`)
+          .setParameters(applicationRolesQuery.getParameters())
+          .execute();
+
+        await manager.update(
+          AgentChatChannelRoleEntity,
+          { workspaceId, channelId: In(channelIds), applicationId },
+          { applicationId: workspaceCustomFlatApplication.id },
         );
 
         await replaceAgentChatChannelRuleGrants({

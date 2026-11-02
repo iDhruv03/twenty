@@ -589,8 +589,7 @@ export class AgentChatThreadService {
   }
 
   // The message is already sent, so a mention that cannot be applied leaves the
-  // member out rather than failing the send. The sender mentioning themselves
-  // owes themselves nothing
+  // member out rather than failing the send
   async addMentionedParticipants({
     mentionedWorkspaceMemberIds,
     ...args

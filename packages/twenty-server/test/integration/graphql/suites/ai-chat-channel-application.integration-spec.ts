@@ -26,6 +26,7 @@ import { AiExceptionCode } from 'src/engine/metadata-modules/ai/ai.exception';
 import { getWorkspaceSchemaName } from 'src/engine/workspace-datasource/utils/get-workspace-schema-name.util';
 import { SEED_APPLE_WORKSPACE_ID } from 'src/engine/workspace-manager/dev-seeder/core/constants/seeder-workspaces.constant';
 import { STANDARD_AGENT_CHAT_CHANNEL } from 'src/engine/workspace-manager/twenty-standard-application/constants/standard-agent-chat-channel.constant';
+import { WORKSPACE_MEMBER_DATA_SEED_IDS } from 'src/engine/workspace-manager/dev-seeder/data/constants/workspace-member-data-seeds.constant';
 
 const SCHEMA = getWorkspaceSchemaName(SEED_APPLE_WORKSPACE_ID);
 
@@ -69,11 +70,31 @@ const DELETE_CHANNEL = parse(
 );
 
 const CHANNEL_SUMMARIES = parse(
-  `query Summaries { agentChatChannelSummaries { channelId } }`,
+  `query Summaries { agentChatChannelSummaries { channelId openCount mentionedCount assignedToMeCount assignedCount unassignedCount snoozedCount doneCount hasUnreadOpen hasUnreadAssignedToMe } }`,
 );
 
 const CREATE_THREAD = parse(
   `mutation CreateThread($channelId: UUID) { createChatThread(channelId: $channelId) { id } }`,
+);
+
+const CHANNEL_THREAD_IDS = parse(
+  `query ThreadIds($channelId: UUID!, $assignment: AgentChatChannelAssignmentFilter, $filter: AgentChatChannelThreadFilter) { agentChatChannelThreadIds(channelId: $channelId, assignment: $assignment, filter: $filter) { threadIds } }`,
+);
+
+const MOVE_THREAD = parse(
+  `mutation MoveThread($threadId: UUID!, $channelId: UUID) { moveAgentChatThreadToChannel(threadId: $threadId, channelId: $channelId) }`,
+);
+
+const MARK_THREAD_DONE = parse(
+  `mutation MarkThreadDone($threadId: UUID!) { markAgentChatThreadAsDoneInChannel(threadId: $threadId) }`,
+);
+
+const SNOOZE_THREAD = parse(
+  `mutation SnoozeThread($threadId: UUID!, $snoozedUntil: DateTime!) { snoozeAgentChatThreadInChannel(threadId: $threadId, snoozedUntil: $snoozedUntil) }`,
+);
+
+const REOPEN_THREAD = parse(
+  `mutation ReopenThread($threadId: UUID!) { reopenAgentChatThreadInChannel(threadId: $threadId) }`,
 );
 
 const setupApplicationUnderTest = async ({
@@ -181,6 +202,29 @@ const readThreadChannelId = async (threadId: string): Promise<string> => {
 
   return thread.channelId;
 };
+
+const readThreadChannelState = (threadId: string) =>
+  global.testDataSource
+    .createQueryBuilder()
+    .select('thread."channelId"', 'channelId')
+    .addSelect('thread."channelArchivedAt"', 'channelArchivedAt')
+    .addSelect('thread."channelSnoozedUntil"', 'channelSnoozedUntil')
+    .from(`${SCHEMA}.agentChatThread`, 'thread')
+    .where('thread.id = :threadId', { threadId })
+    .getRawOne<{
+      channelId: string;
+      channelArchivedAt: Date | null;
+      channelSnoozedUntil: Date | null;
+    }>();
+
+const readThreadParticipants = (threadId: string) =>
+  global.testDataSource
+    .createQueryBuilder()
+    .select('participant.*')
+    .from(`${SCHEMA}.agentChatThreadParticipant`, 'participant')
+    .where('participant."threadId" = :threadId', { threadId })
+    .orderBy('participant.id')
+    .getRawMany<Record<string, unknown>>();
 
 const readChannelGrants = async (
   threadId: string,
@@ -667,13 +711,201 @@ describe('Inbox channels managed by an application', () => {
     ).toBeUndefined();
   });
 
-  it('keeps the conversation endpoints of channels closed to application tokens', async () => {
-    const response = await makeMetadataApiRequest(
+  it('lists channel conversations through the application role without a personal inbox state', async () => {
+    const channelId = await createChannelOrThrow({
+      input: { name: buildChannelName(), roleIds: [channelReader.roleId] },
+      token: APPLE_JANE_ADMIN_ACCESS_TOKEN,
+    });
+    const threadId = await createThreadInChannel(channelId);
+
+    await global.testDataSource
+      .createQueryBuilder()
+      .update(`${SCHEMA}.agentChatThread`)
+      .set({
+        assigneeId: WORKSPACE_MEMBER_DATA_SEED_IDS.JANE,
+        lastActivityAt: new Date(),
+      })
+      .where('id = :threadId', { threadId })
+      .execute();
+
+    const threadIdsResponse = await makeMetadataApiRequest(
+      { query: CHANNEL_THREAD_IDS, variables: { channelId } },
+      channelReader.token,
+    );
+    const summariesResponse = await makeMetadataApiRequest(
       { query: CHANNEL_SUMMARIES },
-      channelManager.token,
+      channelReader.token,
     );
 
-    expect(response.body.errors[0].extensions.code).toBe('FORBIDDEN');
+    assertGraphQLSuccessfulResponse(threadIdsResponse);
+    assertGraphQLSuccessfulResponse(summariesResponse);
+    expect(
+      threadIdsResponse.body.data.agentChatChannelThreadIds.threadIds,
+    ).toEqual([threadId]);
+    expect(
+      summariesResponse.body.data.agentChatChannelSummaries,
+    ).toContainEqual({
+      channelId,
+      openCount: 1,
+      mentionedCount: 0,
+      assignedToMeCount: 0,
+      assignedCount: 1,
+      unassignedCount: 0,
+      snoozedCount: 0,
+      doneCount: 0,
+      hasUnreadOpen: false,
+      hasUnreadAssignedToMe: false,
+    });
+
+    for (const personalFilter of [
+      { assignment: 'ASSIGNED_TO_ME' },
+      { filter: 'MENTIONED' },
+    ]) {
+      const response = await makeMetadataApiRequest(
+        {
+          query: CHANNEL_THREAD_IDS,
+          variables: { channelId, ...personalFilter },
+        },
+        channelReader.token,
+      );
+
+      assertGraphQLSuccessfulResponse(response);
+      expect(response.body.data.agentChatChannelThreadIds.threadIds).toEqual(
+        [],
+      );
+    }
+  });
+
+  it('moves and files channel conversations without changing any member inbox copy', async () => {
+    const channelIds: string[] = [];
+
+    for (const name of [buildChannelName(), buildChannelName()]) {
+      channelIds.push(
+        await createChannelOrThrow({
+          input: { name, roleIds: [channelReader.roleId] },
+          token: APPLE_JANE_ADMIN_ACCESS_TOKEN,
+        }),
+      );
+    }
+
+    const [sourceChannelId, destinationChannelId] = channelIds;
+    const threadId = await createThreadInChannel(sourceChannelId);
+    const participantsBefore = await readThreadParticipants(threadId);
+
+    expect(participantsBefore).not.toHaveLength(0);
+
+    assertGraphQLSuccessfulResponse(
+      await makeMetadataApiRequest(
+        {
+          query: MOVE_THREAD,
+          variables: { threadId, channelId: destinationChannelId },
+        },
+        channelReader.token,
+      ),
+    );
+    expect(await readThreadChannelState(threadId)).toEqual({
+      channelId: destinationChannelId,
+      channelArchivedAt: null,
+      channelSnoozedUntil: null,
+    });
+
+    assertGraphQLSuccessfulResponse(
+      await makeMetadataApiRequest(
+        { query: MARK_THREAD_DONE, variables: { threadId } },
+        channelReader.token,
+      ),
+    );
+    expect(await readThreadChannelState(threadId)).toMatchObject({
+      channelArchivedAt: expect.any(Date),
+      channelSnoozedUntil: null,
+    });
+    expect(await readThreadParticipants(threadId)).toEqual(participantsBefore);
+
+    const snoozedUntil = new Date(Date.now() + 30_000);
+
+    assertGraphQLSuccessfulResponse(
+      await makeMetadataApiRequest(
+        {
+          query: SNOOZE_THREAD,
+          variables: { threadId, snoozedUntil: snoozedUntil.toISOString() },
+        },
+        channelReader.token,
+      ),
+    );
+    expect(await readThreadChannelState(threadId)).toMatchObject({
+      channelArchivedAt: expect.any(Date),
+      channelSnoozedUntil: snoozedUntil,
+    });
+    expect(await readThreadParticipants(threadId)).toEqual(participantsBefore);
+
+    assertGraphQLSuccessfulResponse(
+      await makeMetadataApiRequest(
+        { query: REOPEN_THREAD, variables: { threadId } },
+        channelReader.token,
+      ),
+    );
+    expect(await readThreadChannelState(threadId)).toEqual({
+      channelId: destinationChannelId,
+      channelArchivedAt: null,
+      channelSnoozedUntil: null,
+    });
+    expect(await readThreadParticipants(threadId)).toEqual(participantsBefore);
+  });
+
+  it('refuses inaccessible conversations and destination channels for application callers', async () => {
+    const accessibleChannelId = await createChannelOrThrow({
+      input: { name: buildChannelName(), roleIds: [channelReader.roleId] },
+      token: APPLE_JANE_ADMIN_ACCESS_TOKEN,
+    });
+    const accessibleThreadId = await createThreadInChannel(accessibleChannelId);
+    const inaccessibleThreadId = await createThreadInChannel(generalChannelId);
+    const inaccessibleThreadState =
+      await readThreadChannelState(inaccessibleThreadId);
+    const channelResponses = [
+      await makeMetadataApiRequest(
+        {
+          query: CHANNEL_THREAD_IDS,
+          variables: { channelId: generalChannelId },
+        },
+        channelReader.token,
+      ),
+      await makeMetadataApiRequest(
+        {
+          query: MOVE_THREAD,
+          variables: {
+            threadId: accessibleThreadId,
+            channelId: generalChannelId,
+          },
+        },
+        channelReader.token,
+      ),
+    ];
+
+    for (const response of channelResponses) {
+      expect(response.body.errors[0].extensions).toMatchObject({
+        code: 'NOT_FOUND',
+        subCode: AiExceptionCode.CHAT_CHANNEL_NOT_FOUND,
+      });
+    }
+
+    const threadResponse = await makeMetadataApiRequest(
+      {
+        query: MARK_THREAD_DONE,
+        variables: { threadId: inaccessibleThreadId },
+      },
+      channelReader.token,
+    );
+
+    expect(threadResponse.body.errors[0].extensions).toMatchObject({
+      code: 'NOT_FOUND',
+      subCode: AiExceptionCode.THREAD_NOT_FOUND,
+    });
+    expect(await readThreadChannelId(accessibleThreadId)).toBe(
+      accessibleChannelId,
+    );
+    expect(await readThreadChannelState(inaccessibleThreadId)).toEqual(
+      inaccessibleThreadState,
+    );
   });
 });
 

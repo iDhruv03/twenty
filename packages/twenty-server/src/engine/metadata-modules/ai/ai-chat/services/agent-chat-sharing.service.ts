@@ -14,7 +14,7 @@ import { backfillWorkspaceChatThreadOwnerGrants } from 'src/engine/metadata-modu
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import chunk from 'lodash.chunk';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 
 import { PermissionFlagType } from 'twenty-shared/constants';
 import {
@@ -23,7 +23,11 @@ import {
 } from 'twenty-shared/types';
 import { isDefined, isNonEmptyArray } from 'twenty-shared/utils';
 
+import { isOAuthOnlyApplication } from 'src/engine/core-modules/application/utils/is-oauth-only-application.util';
+import { isApplicationAuthContext } from 'src/engine/core-modules/auth/guards/is-application-auth-context.guard';
+import { isUserAuthContext } from 'src/engine/core-modules/auth/guards/is-user-auth-context.guard';
 import { type UserWorkspaceAuthContext } from 'src/engine/core-modules/auth/types/workspace-auth-context.type';
+import { type AgentInboxCallerAuthContext } from 'src/engine/metadata-modules/ai/ai-chat/types/agent-inbox-caller-auth-context.type';
 import { buildRecordShareLockKey } from 'src/engine/permissions/record-share/utils/build-record-share-lock-key.util';
 import { RecordShareException } from 'src/engine/permissions/record-share/record-share.exception';
 import { RecordShareStorageService } from 'src/engine/permissions/record-share/services/record-share-storage.service';
@@ -41,6 +45,7 @@ import { lockAgentChatChannelForThreadWriteOrThrow } from 'src/engine/metadata-m
 import { throwAgentChatThreadNotFound } from 'src/engine/metadata-modules/ai/ai-chat/utils/throw-agent-chat-thread-not-found.util';
 import { AgentMessageRole } from 'src/engine/metadata-modules/ai/ai-history/enums/agent-message-role.enum';
 import { AgentChatThreadWorkspaceEntity } from 'src/engine/metadata-modules/ai/ai-history/standard-objects/agent-chat-thread.workspace-entity';
+import { AgentMessageWorkspaceEntity } from 'src/engine/metadata-modules/ai/ai-history/standard-objects/agent-message.workspace-entity';
 import { InjectAgentHistoryRepository } from 'src/engine/metadata-modules/ai/ai-history/repositories/inject-agent-history-repository.decorator';
 import { AgentHistoryRepository } from 'src/engine/metadata-modules/ai/ai-history/repositories/agent-history-repository';
 import { type AgentHistoryStorageContext } from 'src/engine/metadata-modules/ai/ai-history/services/agent-history-workspace-storage.service';
@@ -83,6 +88,8 @@ export class AgentChatSharingService {
     private readonly recordAccessPolicyService: RecordAccessPolicyService,
     @InjectRepository(UserWorkspaceEntity)
     private readonly userWorkspaceRepository: Repository<UserWorkspaceEntity>,
+    @InjectAgentHistoryRepository('agentMessage')
+    private readonly agentMessageRepository: AgentHistoryRepository<AgentMessageWorkspaceEntity>,
   ) {}
 
   // TODO(@FelixMalfait): remove once 2.51 leaves the cross-upgrade window. Until
@@ -156,6 +163,22 @@ export class AgentChatSharingService {
     }).has(threadId);
   }
 
+  doesApplicationParticipateInThread({
+    workspaceId,
+    applicationId,
+    threadId,
+  }: {
+    workspaceId: string;
+    applicationId: string;
+    threadId: string;
+  }): Promise<boolean> {
+    return this.agentMessageRepository.existsBy(workspaceId, {
+      threadId,
+      senderApplicationId: applicationId,
+      senderWorkspaceMemberId: IsNull(),
+    });
+  }
+
   getReadableThread(args: AgentChatThreadAccessArgs) {
     return this.getThreadWithAccess({ ...args, operationType: 'select' });
   }
@@ -166,17 +189,69 @@ export class AgentChatSharingService {
   }: AgentChatThreadAccessArgs & {
     operationType: OperationType;
   }) {
-    const authContext = await this.getAuthContext(args);
-    const thread = await this.threadRepository.findOne(args.workspaceId, {
-      where: { id: args.threadId },
+    return this.findThreadWithContextPermissions({
+      authContext: await this.getAuthContext(args),
+      threadId: args.threadId,
+      operationType,
     });
+  }
+
+  async getCallerThreadWithAccess({
+    authContext,
+    threadId,
+    operationType,
+  }: {
+    authContext: AgentInboxCallerAuthContext;
+    threadId: string;
+    operationType: OperationType;
+  }): Promise<AgentChatThreadWorkspaceEntity> {
+    return this.findThreadWithContextPermissions({
+      authContext: await this.getCallerAuthContextOrThrow(authContext),
+      threadId,
+      operationType,
+    });
+  }
+
+  private async findThreadWithContextPermissions({
+    authContext,
+    threadId,
+    operationType,
+  }: {
+    authContext: AgentInboxCallerAuthContext;
+    threadId: string;
+    operationType: OperationType;
+  }): Promise<AgentChatThreadWorkspaceEntity> {
+    const thread = await this.threadRepository.findOne(
+      authContext.workspace.id,
+      {
+        where: { id: threadId },
+      },
+    );
+
     if (!isDefined(thread)) {
       return throwAgentChatThreadNotFound();
     }
+
+    const isApplicationParticipant =
+      isApplicationAuthContext(authContext) &&
+      AGENT_CHAT_REPLY_OPERATION_TYPES.some(
+        (replyOperationType) => replyOperationType === operationType,
+      ) &&
+      (await this.doesApplicationParticipateInThread({
+        workspaceId: authContext.workspace.id,
+        applicationId: authContext.application.id,
+        threadId,
+      }));
+
+    if (isApplicationParticipant) {
+      return thread;
+    }
+
     await this.workspaceOrmManager.executeInWorkspaceContext(
-      () => this.assertOperationAllowed(args.threadId, operationType),
+      () => this.assertOperationAllowed(threadId, operationType),
       authContext,
     );
+
     return thread;
   }
 
@@ -657,8 +732,13 @@ export class AgentChatSharingService {
     );
   }
 
-  async getAuthContext(args: Omit<AgentChatThreadAccessArgs, 'threadId'>) {
-    const authContext = await this.userAuthContextService
+  async getAuthContext(
+    args: Omit<AgentChatThreadAccessArgs, 'threadId'> & {
+      applicationId?: string | null;
+      agentId?: string;
+    },
+  ) {
+    const memberAuthContext = await this.userAuthContextService
       .resolveWorkspaceMember(args)
       .catch((error: unknown) => {
         if (error instanceof AuthException) {
@@ -666,18 +746,54 @@ export class AgentChatSharingService {
         }
         throw error;
       });
+    const authContext = { ...memberAuthContext, agentId: args.agentId };
+
+    await this.assertCallerHasAiPermissionOrThrow(authContext);
+
+    return authContext;
+  }
+
+  async getCallerAuthContextOrThrow(
+    authContext: AgentInboxCallerAuthContext,
+  ): Promise<AgentInboxCallerAuthContext> {
+    if (isUserAuthContext(authContext)) {
+      const isOAuthOnlyApplicationCaller =
+        isDefined(authContext.application) &&
+        isOAuthOnlyApplication(authContext.application);
+
+      return this.getAuthContext({
+        workspaceId: authContext.workspace.id,
+        workspaceMemberId: authContext.workspaceMemberId,
+        applicationId: isOAuthOnlyApplicationCaller
+          ? undefined
+          : (authContext.application?.id ?? null),
+        agentId: authContext.agentId,
+      });
+    }
+
+    await this.assertCallerHasAiPermissionOrThrow(authContext);
+
+    return authContext;
+  }
+
+  private async assertCallerHasAiPermissionOrThrow(
+    authContext: AgentInboxCallerAuthContext,
+  ): Promise<void> {
     if (
-      !(await this.permissionsService.userHasWorkspaceSettingPermission({
-        workspaceId: args.workspaceId,
-        userWorkspaceId: authContext.userWorkspaceId,
+      await this.permissionsService.userHasWorkspaceSettingPermission({
+        workspaceId: authContext.workspace.id,
+        userWorkspaceId: isUserAuthContext(authContext)
+          ? authContext.userWorkspaceId
+          : undefined,
         setting: PermissionFlagType.AI,
         applicationId: authContext.application?.id,
         agentId: authContext.agentId,
-      }))
+      })
     ) {
-      return throwAgentChatThreadNotFound();
+      return;
     }
-    return authContext;
+
+    throwAgentChatThreadNotFound();
   }
 
   // must run inside the caller's workspace context

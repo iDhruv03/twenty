@@ -14,6 +14,7 @@ import { AgentChatThreadParticipantService } from 'src/engine/metadata-modules/a
 import { AgentChatThreadRecordEventService } from 'src/engine/metadata-modules/ai/ai-chat/services/agent-chat-thread-record-event.service';
 import { type AgentChatThreadAccessArgs } from 'src/engine/metadata-modules/ai/ai-chat/types/agent-chat-thread-access-args.type';
 import { type AgentChatThreadActivity } from 'src/engine/metadata-modules/ai/ai-chat/types/agent-chat-thread-activity.type';
+import { type AgentInboxCallerAuthContext } from 'src/engine/metadata-modules/ai/ai-chat/types/agent-inbox-caller-auth-context.type';
 import { buildAgentChatThreadActivitySetClause } from 'src/engine/metadata-modules/ai/ai-chat/utils/build-agent-chat-thread-activity-set-clause.util';
 import { isUniqueViolationError } from 'src/engine/metadata-modules/ai/ai-chat/utils/is-unique-violation-error.util';
 import { lockAgentChatChannelForThreadWriteOrThrow } from 'src/engine/metadata-modules/ai/ai-chat/utils/lock-agent-chat-channel-for-thread-write-or-throw.util';
@@ -488,15 +489,23 @@ export class AgentChatThreadService {
 
   async moveToChannel({
     channelId,
-    ...args
-  }: AgentChatThreadAccessArgs & {
+    authContext,
+    threadId,
+  }: {
+    authContext: AgentInboxCallerAuthContext;
+    threadId: string;
     channelId: string | null;
   }): Promise<void> {
-    const thread = await this.getWritableThread(args);
+    const workspaceId = authContext.workspace.id;
+    const thread = await this.sharingService.getCallerThreadWithAccess({
+      authContext,
+      threadId,
+      operationType: 'update',
+    });
 
     if (isDefined(channelId)) {
-      await this.channelAccessService.assertChannelAccess({
-        ...args,
+      await this.channelAccessService.assertCallerChannelAccess({
+        authContext,
         channelId,
       });
     }
@@ -507,12 +516,12 @@ export class AgentChatThreadService {
 
     // Owner re-checked in the UPDATE: removing a member clears it on their channel chats
     const movedThreadIds = await this.threadRepository.query(
-      args.workspaceId,
+      workspaceId,
       async ({ manager, table }) => {
         if (isDefined(channelId)) {
           await lockAgentChatChannelForThreadWriteOrThrow({
             manager,
-            workspaceId: args.workspaceId,
+            workspaceId,
             channelId,
           });
         }
@@ -521,7 +530,7 @@ export class AgentChatThreadService {
           { channelId: string | null }[]
         >(
           `SELECT "channelId" FROM ${table('agentChatThread')} WHERE id = $1 FOR NO KEY UPDATE`,
-          [args.threadId],
+          [threadId],
         );
 
         if (!isDefined(lockedThread)) {
@@ -540,12 +549,12 @@ export class AgentChatThreadService {
              RETURNING id
            )
            SELECT id FROM moved_thread`,
-          [args.threadId, channelId],
+          [threadId, channelId],
         );
 
         await this.channelGrantService.rewriteThreadGrantsInTransaction({
           manager,
-          workspaceId: args.workspaceId,
+          workspaceId,
           threadIds: movedThreads.map(({ id }) => id),
           affectedChannelIds: [lockedThread.channelId, channelId],
         });
@@ -562,7 +571,7 @@ export class AgentChatThreadService {
     }
 
     await this.threadRecordEventService.emitThreadUpdated({
-      workspaceId: args.workspaceId,
+      workspaceId,
       threadBefore: thread,
     });
   }

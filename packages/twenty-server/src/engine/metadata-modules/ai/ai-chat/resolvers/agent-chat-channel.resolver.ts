@@ -25,7 +25,6 @@ import { getWorkspaceAuthContext } from 'src/engine/core-modules/auth/storage/wo
 import { type WorkspaceEntity } from 'src/engine/core-modules/workspace/workspace.entity';
 import { AuthApplication } from 'src/engine/decorators/auth/auth-application.decorator';
 import { AuthUserWorkspaceId } from 'src/engine/decorators/auth/auth-user-workspace-id.decorator';
-import { AuthWorkspaceMemberId } from 'src/engine/decorators/auth/auth-workspace-member-id.decorator';
 import { AuthWorkspace } from 'src/engine/decorators/auth/auth-workspace.decorator';
 import { AuthPrincipalGuard } from 'src/engine/guards/auth-principal.guard';
 import { SettingsPermissionGuard } from 'src/engine/guards/settings-permission.guard';
@@ -89,19 +88,6 @@ export class AgentChatChannelResolver {
   }
 
   @Query(() => AgentChatChannelThreadIdsDTO)
-  @UseGuards(
-    AuthPrincipalGuard({
-      userSession: {
-        standard: true,
-        impersonated: true,
-        playground: true,
-        workspaceAgnostic: false,
-      },
-      apiKey: false,
-      oauthClient: { withUser: true, withoutUser: false },
-      application: { withUser: true, withoutUser: false },
-    }),
-  )
   async agentChatChannelThreadIds(
     @Args('channelId', { type: () => UUIDScalarType }) channelId: string,
     @Args('status', {
@@ -121,8 +107,6 @@ export class AgentChatChannelResolver {
     filter: AgentChatChannelThreadFilter | null,
     @Args('first', { type: () => Int, nullable: true }) first: number | null,
     @Args('after', { type: () => String, nullable: true }) after: string | null,
-    @AuthWorkspaceMemberId() workspaceMemberId: string,
-    @AuthWorkspace() { id: workspaceId }: WorkspaceEntity,
   ): Promise<AgentChatChannelThreadIdsDTO> {
     return this.channelThreadsService.findThreadIds({
       channelId,
@@ -131,32 +115,14 @@ export class AgentChatChannelResolver {
       filter,
       first,
       after,
-      workspaceMemberId,
-      workspaceId,
+      authContext: this.getCallerAuthContextOrThrow(),
     });
   }
 
   @Query(() => [AgentChatChannelSummaryDTO])
-  @UseGuards(
-    AuthPrincipalGuard({
-      userSession: {
-        standard: true,
-        impersonated: true,
-        playground: true,
-        workspaceAgnostic: false,
-      },
-      apiKey: false,
-      oauthClient: { withUser: true, withoutUser: false },
-      application: { withUser: true, withoutUser: false },
-    }),
-  )
-  async agentChatChannelSummaries(
-    @AuthWorkspaceMemberId() workspaceMemberId: string,
-    @AuthWorkspace() { id: workspaceId }: WorkspaceEntity,
-  ): Promise<AgentChatChannelSummaryDTO[]> {
+  async agentChatChannelSummaries(): Promise<AgentChatChannelSummaryDTO[]> {
     return this.channelThreadsService.findSummaries({
-      workspaceMemberId,
-      workspaceId,
+      authContext: this.getCallerAuthContextOrThrow(),
     });
   }
 
@@ -256,119 +222,55 @@ export class AgentChatChannelResolver {
   }
 
   @Mutation(() => Boolean)
-  @UseGuards(
-    AuthPrincipalGuard({
-      userSession: {
-        standard: true,
-        impersonated: true,
-        playground: true,
-        workspaceAgnostic: false,
-      },
-      apiKey: false,
-      oauthClient: { withUser: true, withoutUser: false },
-      application: { withUser: true, withoutUser: false },
-    }),
-  )
   async moveAgentChatThreadToChannel(
     @Args('threadId', { type: () => UUIDScalarType }) threadId: string,
     @Args('channelId', { type: () => UUIDScalarType, nullable: true })
     channelId: string | null,
-    @AuthWorkspaceMemberId() workspaceMemberId: string,
-    @AuthWorkspace() { id: workspaceId }: WorkspaceEntity,
   ): Promise<boolean> {
     await this.threadService.moveToChannel({
       threadId,
       channelId: channelId ?? null,
-      workspaceMemberId,
-      workspaceId,
+      authContext: this.getCallerAuthContextOrThrow(),
     });
 
     return true;
   }
 
   @Mutation(() => Boolean)
-  @UseGuards(
-    AuthPrincipalGuard({
-      userSession: {
-        standard: true,
-        impersonated: true,
-        playground: true,
-        workspaceAgnostic: false,
-      },
-      apiKey: false,
-      oauthClient: { withUser: true, withoutUser: false },
-      application: { withUser: true, withoutUser: false },
-    }),
-  )
   async markAgentChatThreadAsDoneInChannel(
     @Args('threadId', { type: () => UUIDScalarType }) threadId: string,
-    @AuthWorkspaceMemberId() workspaceMemberId: string,
-    @AuthWorkspace() { id: workspaceId }: WorkspaceEntity,
   ): Promise<boolean> {
     await this.triageService.applyToChannelCopy({
       threadId,
       change: { action: AgentChatInboxAction.ARCHIVE },
-      workspaceMemberId,
-      workspaceId,
+      authContext: this.getCallerAuthContextOrThrow(),
     });
 
     return true;
   }
 
   @Mutation(() => Boolean)
-  @UseGuards(
-    AuthPrincipalGuard({
-      userSession: {
-        standard: true,
-        impersonated: true,
-        playground: true,
-        workspaceAgnostic: false,
-      },
-      apiKey: false,
-      oauthClient: { withUser: true, withoutUser: false },
-      application: { withUser: true, withoutUser: false },
-    }),
-  )
   async snoozeAgentChatThreadInChannel(
     @Args('threadId', { type: () => UUIDScalarType }) threadId: string,
     @Args('snoozedUntil', { type: () => Date }) snoozedUntil: Date,
-    @AuthWorkspaceMemberId() workspaceMemberId: string,
-    @AuthWorkspace() { id: workspaceId }: WorkspaceEntity,
   ): Promise<boolean> {
     await this.triageService.applyToChannelCopy({
       threadId,
       change: { action: AgentChatInboxAction.SNOOZE, snoozedUntil },
-      workspaceMemberId,
-      workspaceId,
+      authContext: this.getCallerAuthContextOrThrow(),
     });
 
     return true;
   }
 
   @Mutation(() => Boolean)
-  @UseGuards(
-    AuthPrincipalGuard({
-      userSession: {
-        standard: true,
-        impersonated: true,
-        playground: true,
-        workspaceAgnostic: false,
-      },
-      apiKey: false,
-      oauthClient: { withUser: true, withoutUser: false },
-      application: { withUser: true, withoutUser: false },
-    }),
-  )
   async reopenAgentChatThreadInChannel(
     @Args('threadId', { type: () => UUIDScalarType }) threadId: string,
-    @AuthWorkspaceMemberId() workspaceMemberId: string,
-    @AuthWorkspace() { id: workspaceId }: WorkspaceEntity,
   ): Promise<boolean> {
     await this.triageService.applyToChannelCopy({
       threadId,
       change: { action: AgentChatInboxAction.MOVE_TO_INBOX },
-      workspaceMemberId,
-      workspaceId,
+      authContext: this.getCallerAuthContextOrThrow(),
     });
 
     return true;

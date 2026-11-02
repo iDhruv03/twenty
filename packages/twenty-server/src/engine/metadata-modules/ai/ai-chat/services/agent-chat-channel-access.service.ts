@@ -26,12 +26,12 @@ export class AgentChatChannelAccessService {
     private readonly workspaceCacheService: WorkspaceCacheService,
   ) {}
 
-  async findAccessibleChannels(
-    args: MemberArgs,
+  async findCallerAccessibleChannels(
+    authContext: AgentInboxCallerAuthContext,
   ): Promise<FlatAgentChatChannelWithRoleIds[]> {
     const [channels, role] = await Promise.all([
-      this.channelMetadataService.findChannels(args.workspaceId),
-      this.findMemberRole(args),
+      this.channelMetadataService.findChannels(authContext.workspace.id),
+      this.findCallerRole(authContext),
     ]);
 
     return channels.filter((channel) =>

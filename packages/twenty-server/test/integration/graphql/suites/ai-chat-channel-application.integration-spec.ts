@@ -284,7 +284,7 @@ describe('Inbox channels managed by an application', () => {
     input,
     token,
   }: {
-    input: Record<string, unknown>;
+    input: { name: string; roleIds?: string[]; universalIdentifier?: string };
     token: string;
   }): Promise<string> => {
     const response = await createChannel({ input, token });
@@ -885,7 +885,7 @@ describe('Uninstalling an application that created inbox channels', () => {
     input,
     token,
   }: {
-    input: Record<string, unknown>;
+    input: { name: string; roleIds?: string[]; universalIdentifier?: string };
     token: string;
   }): Promise<string> => {
     const response = await makeMetadataApiRequest(

@@ -204,6 +204,9 @@ describe('ApplicationInstallService', () => {
 
     await expect(install()).rejects.toThrow('Manifest sync failed');
 
+    expect(applicationSyncService.uninstallApplication).toHaveBeenCalledTimes(
+      1,
+    );
     expect(applicationSyncService.uninstallApplication).toHaveBeenCalledWith({
       applicationUniversalIdentifier: APPLICATION_UNIVERSAL_IDENTIFIER,
       workspaceId: WORKSPACE_ID,

@@ -284,16 +284,16 @@ export class AgentChatChannelMetadataService {
 
     const transferredChannelIds = await this.coreDataSource.transaction(
       async (manager) => {
-        const transferredChannels = await manager.query<{ id: string }[]>(
-          `WITH transferred_channel AS (
-             UPDATE core."agentChatChannel"
-             SET "applicationId" = $3, "updatedAt" = now()
-             WHERE "workspaceId" = $1 AND "applicationId" = $2
-             RETURNING id
-           )
-           SELECT id FROM transferred_channel`,
-          [workspaceId, applicationId, workspaceCustomFlatApplication.id],
-        );
+        const transferredChannelsResult = await manager
+          .getRepository(AgentChatChannelEntity)
+          .createQueryBuilder()
+          .update()
+          .set({ applicationId: workspaceCustomFlatApplication.id })
+          .where({ workspaceId, applicationId })
+          .returning(['id'])
+          .execute();
+        const transferredChannels: Pick<AgentChatChannelEntity, 'id'>[] =
+          transferredChannelsResult.raw;
         const channelIds = transferredChannels.map(({ id }) => id);
 
         if (!isNonEmptyArray(channelIds)) {

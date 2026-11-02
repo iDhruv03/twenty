@@ -129,6 +129,30 @@ const NAVIGATION_MENU_ITEM: FlatNavigationMenuItem = {
   position: 0,
 };
 
+const AGENT_CHAT_CHANNEL: FlatAgentChatChannel = {
+  ...SYNCABLE,
+  id: 'agent-chat-channel-id',
+  universalIdentifier: 'agent-chat-channel-universal-identifier',
+  name: 'App channel',
+  icon: null,
+  color: null,
+  position: 1,
+  channelRoleIds: [],
+  channelRoleUniversalIdentifiers: [],
+  navigationMenuItemIds: [],
+  navigationMenuItemUniversalIdentifiers: [],
+};
+
+const AGENT_CHAT_CHANNEL_ROLE: FlatAgentChatChannelRole = {
+  ...SYNCABLE,
+  id: 'agent-chat-channel-role-id',
+  universalIdentifier: 'agent-chat-channel-role-universal-identifier',
+  channelId: AGENT_CHAT_CHANNEL.id,
+  channelUniversalIdentifier: AGENT_CHAT_CHANNEL.universalIdentifier,
+  roleId: 'role-id',
+  roleUniversalIdentifier: 'role-universal-identifier',
+};
+
 const WORKSPACE_CUSTOM_APPLICATION_UNIVERSAL_IDENTIFIER =
   'workspace-custom-application-universal-identifier';
 
@@ -184,31 +208,6 @@ const buildAllFlatEntityMapsWithAgentAndSkill = ({
   });
 
   return allFlatEntityMaps;
-};
-
-const AGENT_CHAT_CHANNEL: FlatAgentChatChannel = {
-  ...SYNCABLE,
-  id: 'agent-chat-channel-id',
-  universalIdentifier: 'agent-chat-channel-universal-identifier',
-  name: 'App channel',
-  icon: null,
-  color: null,
-  position: 1,
-  isCustom: true,
-  channelRoleIds: [],
-  channelRoleUniversalIdentifiers: [],
-  navigationMenuItemIds: [],
-  navigationMenuItemUniversalIdentifiers: [],
-};
-
-const AGENT_CHAT_CHANNEL_ROLE: FlatAgentChatChannelRole = {
-  ...SYNCABLE,
-  id: 'agent-chat-channel-role-id',
-  universalIdentifier: 'agent-chat-channel-role-universal-identifier',
-  channelId: AGENT_CHAT_CHANNEL.id,
-  channelUniversalIdentifier: AGENT_CHAT_CHANNEL.universalIdentifier,
-  roleId: 'role-id',
-  roleUniversalIdentifier: 'role-universal-identifier',
 };
 
 const BUILD_OPTIONS = {

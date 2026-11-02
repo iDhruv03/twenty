@@ -2,52 +2,60 @@ import { STANDARD_OBJECTS } from 'twenty-shared/metadata';
 import { isDefined, isNonEmptyArray } from 'twenty-shared/utils';
 import { type EntityManager } from 'typeorm';
 
+import { AgentChatChannelEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel.entity';
 import { acquireAgentChatChannelGrantLocks } from 'src/engine/metadata-modules/ai/ai-chat/utils/acquire-agent-chat-channel-grant-locks.util';
 import { replaceAgentChatChannelRuleGrants } from 'src/engine/metadata-modules/ai/ai-chat/utils/replace-agent-chat-channel-rule-grants.util';
+import { FieldMetadataEntity } from 'src/engine/metadata-modules/field-metadata/field-metadata.entity';
 import { getWorkspaceSchemaName } from 'src/engine/workspace-datasource/utils/get-workspace-schema-name.util';
 import { STANDARD_AGENT_CHAT_CHANNEL } from 'src/engine/workspace-manager/twenty-standard-application/constants/standard-agent-chat-channel.constant';
-import { escapeIdentifier } from 'src/engine/workspace-manager/workspace-migration/utils/remove-sql-injection.util';
 
 export const moveAgentChatChannelThreadsToGeneral = async ({
   manager,
   workspaceId,
   channelId,
 }: {
-  manager: Pick<EntityManager, 'query'>;
+  manager: Pick<
+    EntityManager,
+    'query' | 'createQueryBuilder' | 'getRepository'
+  >;
   workspaceId: string;
   channelId: string;
 }): Promise<void> => {
-  const [generalChannel] = await manager.query<{ id: string }[]>(
-    `SELECT channel.id
-     FROM core."agentChatChannel" channel
-     WHERE channel."workspaceId" = $1
-       AND channel."universalIdentifier" = $2
-       AND EXISTS (
-         SELECT 1 FROM core."fieldMetadata" field
-         WHERE field."workspaceId" = $1 AND field."universalIdentifier" = $3
-       )`,
-    [
+  const hasChannelField = await manager
+    .getRepository(FieldMetadataEntity)
+    .existsBy({
       workspaceId,
-      STANDARD_AGENT_CHAT_CHANNEL.general.universalIdentifier,
-      STANDARD_OBJECTS.agentChatThread.fields.channelId.universalIdentifier,
-    ],
-  );
+      universalIdentifier:
+        STANDARD_OBJECTS.agentChatThread.fields.channelId.universalIdentifier,
+    });
+
+  if (!hasChannelField) {
+    return;
+  }
+
+  const generalChannel = await manager
+    .getRepository(AgentChatChannelEntity)
+    .findOne({
+      select: { id: true },
+      where: {
+        workspaceId,
+        universalIdentifier:
+          STANDARD_AGENT_CHAT_CHANNEL.general.universalIdentifier,
+      },
+    });
 
   if (!isDefined(generalChannel)) {
     return;
   }
 
-  const schema = escapeIdentifier(getWorkspaceSchemaName(workspaceId));
-  const movedThreads = await manager.query<{ id: string }[]>(
-    `WITH moved_thread AS (
-       UPDATE ${schema}."agentChatThread"
-       SET "channelId" = $2, "updatedAt" = now()
-       WHERE "channelId" = $1
-       RETURNING id
-     )
-     SELECT id FROM moved_thread`,
-    [channelId, generalChannel.id],
-  );
+  const movedThreadsResult = await manager
+    .createQueryBuilder()
+    .update(`${getWorkspaceSchemaName(workspaceId)}.agentChatThread`)
+    .set({ channelId: generalChannel.id, updatedAt: () => 'CURRENT_TIMESTAMP' })
+    .where('"channelId" = :channelId', { channelId })
+    .returning('id')
+    .execute();
+  const movedThreads = movedThreadsResult.raw as { id: string }[];
 
   if (!isNonEmptyArray(movedThreads)) {
     return;

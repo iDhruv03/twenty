@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-import { isDefined } from 'twenty-shared/utils';
+import { isDefined, isNonEmptyArray } from 'twenty-shared/utils';
 
 import { PostgresAdvisoryLockService } from 'src/database/typeorm/postgres-advisory-lock.service';
 import { type FlatApplication } from 'src/engine/core-modules/application/types/flat-application.type';
@@ -30,6 +30,7 @@ import {
 } from 'src/engine/metadata-modules/ai/ai.exception';
 import { belongsToTwentyStandardApp } from 'src/engine/metadata-modules/utils/belongs-to-twenty-standard-app.util';
 import { WorkspaceCacheService } from 'src/engine/workspace-cache/services/workspace-cache.service';
+import { getWorkspaceSchemaName } from 'src/engine/workspace-datasource/utils/get-workspace-schema-name.util';
 
 type ChannelChanges = {
   name?: string;
@@ -268,66 +269,65 @@ export class AgentChatChannelService {
       after: AgentChatThreadWorkspaceEntity;
     }[]
   > {
-    return this.threadRepository.query(
-      workspaceId,
-      async ({ manager, table }) => {
-        await assertAgentChatChannelExists({ manager, workspaceId, channelId });
+    return this.threadRepository.query(workspaceId, async ({ manager }) => {
+      await assertAgentChatChannelExists({ manager, workspaceId, channelId });
 
-        const threadsBefore = await manager.query<
-          AgentChatThreadWorkspaceEntity[]
-        >(
-          `SELECT * FROM ${table('agentChatThread')}
-           WHERE "channelId" = $1 FOR NO KEY UPDATE`,
-          [channelId],
+      const threadTable = `${getWorkspaceSchemaName(workspaceId)}.agentChatThread`;
+      const threadsBefore = await manager
+        .createQueryBuilder()
+        .select('thread.*')
+        .from(threadTable, 'thread')
+        .where('thread."channelId" = :channelId', { channelId })
+        .setLock('for_no_key_update')
+        .getRawMany<AgentChatThreadWorkspaceEntity>();
+
+      if (!isNonEmptyArray(threadsBefore)) {
+        return [];
+      }
+
+      if (!isDefined(destinationChannelId)) {
+        throw new AiException(
+          'The channel still has chats',
+          AiExceptionCode.CHAT_CHANNEL_NOT_EMPTY,
         );
+      }
 
-        if (threadsBefore.length === 0) {
-          return [];
-        }
+      await lockAgentChatChannelForThreadWriteOrThrow({
+        manager,
+        workspaceId,
+        channelId: destinationChannelId,
+      });
 
-        if (!isDefined(destinationChannelId)) {
-          throw new AiException(
-            'The channel still has chats',
-            AiExceptionCode.CHAT_CHANNEL_NOT_EMPTY,
-          );
-        }
-
-        await lockAgentChatChannelForThreadWriteOrThrow({
-          manager,
-          workspaceId,
+      const movedThreads = await manager
+        .createQueryBuilder()
+        .update<AgentChatThreadWorkspaceEntity>(threadTable)
+        .set({
           channelId: destinationChannelId,
-        });
+          updatedAt: () => 'CURRENT_TIMESTAMP',
+        })
+        .where('id = ANY(:threadIds::uuid[])', {
+          threadIds: threadsBefore.map(({ id }) => id),
+        })
+        .returning('*')
+        .execute();
+      const threadsAfter = movedThreads.raw as AgentChatThreadWorkspaceEntity[];
 
-        const threadsAfter = await manager.query<
-          AgentChatThreadWorkspaceEntity[]
-        >(
-          `WITH moved_thread AS (
-             UPDATE ${table('agentChatThread')}
-             SET "channelId" = $2, "updatedAt" = now()
-             WHERE id = ANY($1::uuid[])
-             RETURNING *
-           )
-           SELECT * FROM moved_thread`,
-          [threadsBefore.map(({ id }) => id), destinationChannelId],
-        );
+      await this.channelGrantService.rewriteThreadGrantsInTransaction({
+        manager,
+        workspaceId,
+        threadIds: threadsAfter.map(({ id }) => id),
+        affectedChannelIds: [channelId, destinationChannelId],
+      });
 
-        await this.channelGrantService.rewriteThreadGrantsInTransaction({
-          manager,
-          workspaceId,
-          threadIds: threadsAfter.map(({ id }) => id),
-          affectedChannelIds: [channelId, destinationChannelId],
-        });
+      const threadBeforeById = new Map(
+        threadsBefore.map((thread) => [thread.id, thread]),
+      );
 
-        const threadBeforeById = new Map(
-          threadsBefore.map((thread) => [thread.id, thread]),
-        );
+      return threadsAfter.flatMap((after) => {
+        const before = threadBeforeById.get(after.id);
 
-        return threadsAfter.flatMap((after) => {
-          const before = threadBeforeById.get(after.id);
-
-          return isDefined(before) ? [{ before, after }] : [];
-        });
-      },
-    );
+        return isDefined(before) ? [{ before, after }] : [];
+      });
+    });
   }
 }

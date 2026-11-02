@@ -6,6 +6,7 @@ import { type EntityManager } from 'typeorm';
 import { InjectMessageQueue } from 'src/engine/core-modules/message-queue/decorators/message-queue.decorator';
 import { MessageQueue } from 'src/engine/core-modules/message-queue/message-queue.constants';
 import { MessageQueueService } from 'src/engine/core-modules/message-queue/services/message-queue.service';
+import { AgentChatChannelEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel.entity';
 import { AGENT_CHAT_CHANNEL_GRANTS_REWRITE_JOB_OPTIONS } from 'src/engine/metadata-modules/ai/ai-chat/constants/agent-chat-channel-grants-rewrite-job-options.constant';
 import { REWRITE_AGENT_CHAT_CHANNEL_GRANTS_JOB_NAME } from 'src/engine/metadata-modules/ai/ai-chat/jobs/rewrite-agent-chat-channel-grants-job-name.constant';
 import { type RewriteAgentChatChannelGrantsJobData } from 'src/engine/metadata-modules/ai/ai-chat/jobs/rewrite-agent-chat-channel-grants-job.types';
@@ -99,10 +100,11 @@ export class AgentChatChannelGrantService {
     const channels = await this.threadRepository.query(
       workspaceId,
       ({ manager }) =>
-        manager.query<{ id: string }[]>(
-          `SELECT id FROM core."agentChatChannel" WHERE "workspaceId" = $1 ORDER BY id`,
-          [workspaceId],
-        ),
+        manager.getRepository(AgentChatChannelEntity).find({
+          select: { id: true },
+          where: { workspaceId },
+          order: { id: 'ASC' },
+        }),
     );
 
     for (const { id: channelId } of channels) {

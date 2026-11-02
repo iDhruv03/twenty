@@ -15,7 +15,12 @@ import { makeMetadataApiRequest } from 'test/integration/metadata/suites/utils/m
 import { destroyAgentChatThread } from 'test/integration/utils/destroy-agent-chat-thread.util';
 import { expectEventually } from 'test/integration/utils/expect-eventually.util';
 import { generateApplicationTokenPair } from 'test/integration/utils/generate-application-token-pair.util';
+import { getCoreRepository } from 'test/integration/utils/get-core-repository.util';
 
+import { ApplicationEntity } from 'src/engine/core-modules/application/application.entity';
+import { WorkspaceEntity } from 'src/engine/core-modules/workspace/workspace.entity';
+import { AgentChatChannelRoleEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel-role.entity';
+import { AgentChatChannelEntity } from 'src/engine/metadata-modules/agent-chat-channel/entities/agent-chat-channel.entity';
 import { lockAgentChatChannelForThreadWriteOrThrow } from 'src/engine/metadata-modules/ai/ai-chat/utils/lock-agent-chat-channel-for-thread-write-or-throw.util';
 import { AiExceptionCode } from 'src/engine/metadata-modules/ai/ai.exception';
 import { getWorkspaceSchemaName } from 'src/engine/workspace-datasource/utils/get-workspace-schema-name.util';
@@ -89,17 +94,21 @@ const setupApplicationUnderTest = async ({
     {
       applicationAccessToken: { token },
     },
-    [{ defaultRoleId }],
+    { defaultRoleId },
   ] = await Promise.all([
     generateApplicationTokenPair({
       workspaceId: SEED_APPLE_WORKSPACE_ID,
       applicationId: application.id,
     }),
-    global.testDataSource.query(
-      `SELECT "defaultRoleId" FROM core."application" WHERE id = $1`,
-      [application.id],
-    ),
+    getCoreRepository<ApplicationEntity>(ApplicationEntity).findOneOrFail({
+      select: { defaultRoleId: true },
+      where: { id: application.id, workspaceId: SEED_APPLE_WORKSPACE_ID },
+    }),
   ]);
+
+  if (!isDefined(defaultRoleId)) {
+    throw new Error('Application default role not found');
+  }
 
   return { application, token, roleId: defaultRoleId };
 };
@@ -107,11 +116,10 @@ const setupApplicationUnderTest = async ({
 const readChannelsWithUniversalIdentifier = async (
   universalIdentifier: string,
 ): Promise<{ id: string; applicationId: string }[]> =>
-  global.testDataSource.query(
-    `SELECT id, "applicationId" FROM core."agentChatChannel"
-     WHERE "workspaceId" = $1 AND "universalIdentifier" = $2`,
-    [SEED_APPLE_WORKSPACE_ID, universalIdentifier],
-  );
+  getCoreRepository<AgentChatChannelEntity>(AgentChatChannelEntity).find({
+    select: { id: true, applicationId: true },
+    where: { workspaceId: SEED_APPLE_WORKSPACE_ID, universalIdentifier },
+  });
 
 const findGeneralChannelId = async (): Promise<string> => {
   const [{ id }] = await readChannelsWithUniversalIdentifier(
@@ -122,12 +130,15 @@ const findGeneralChannelId = async (): Promise<string> => {
 };
 
 const findWorkspaceCustomApplicationId = async (): Promise<string> => {
-  const [{ workspaceCustomApplicationId }]: {
-    workspaceCustomApplicationId: string;
-  }[] = await global.testDataSource.query(
-    `SELECT "workspaceCustomApplicationId" FROM core."workspace" WHERE id = $1`,
-    [SEED_APPLE_WORKSPACE_ID],
-  );
+  const { workspaceCustomApplicationId } =
+    await getCoreRepository<WorkspaceEntity>(WorkspaceEntity).findOneOrFail({
+      select: { workspaceCustomApplicationId: true },
+      where: { id: SEED_APPLE_WORKSPACE_ID },
+    });
+
+  if (!isDefined(workspaceCustomApplicationId)) {
+    throw new Error('Workspace custom application not found');
+  }
 
   return workspaceCustomApplicationId;
 };
@@ -135,11 +146,12 @@ const findWorkspaceCustomApplicationId = async (): Promise<string> => {
 const readChannelApplicationId = async (
   channelId: string,
 ): Promise<string | undefined> => {
-  const [channel]: { applicationId: string }[] =
-    await global.testDataSource.query(
-      `SELECT "applicationId" FROM core."agentChatChannel" WHERE id = $1`,
-      [channelId],
-    );
+  const channel = await getCoreRepository<AgentChatChannelEntity>(
+    AgentChatChannelEntity,
+  ).findOne({
+    select: { applicationId: true },
+    where: { id: channelId, workspaceId: SEED_APPLE_WORKSPACE_ID },
+  });
 
   return channel?.applicationId;
 };
@@ -147,50 +159,72 @@ const readChannelApplicationId = async (
 const readChannelRoleApplicationIds = async (
   channelId: string,
 ): Promise<{ roleId: string; applicationId: string }[]> =>
-  global.testDataSource.query(
-    `SELECT "roleId", "applicationId" FROM core."agentChatChannelRole"
-     WHERE "channelId" = $1 ORDER BY "roleId"`,
-    [channelId],
-  );
+  getCoreRepository<AgentChatChannelRoleEntity>(
+    AgentChatChannelRoleEntity,
+  ).find({
+    select: { roleId: true, applicationId: true },
+    where: { channelId, workspaceId: SEED_APPLE_WORKSPACE_ID },
+    order: { roleId: 'ASC' },
+  });
 
 const readThreadChannelId = async (threadId: string): Promise<string> => {
-  const [{ channelId }]: { channelId: string }[] =
-    await global.testDataSource.query(
-      `SELECT "channelId" FROM ${SCHEMA}."agentChatThread" WHERE id = $1`,
-      [threadId],
-    );
+  const thread = await global.testDataSource
+    .createQueryBuilder()
+    .select('thread."channelId"', 'channelId')
+    .from(`${SCHEMA}.agentChatThread`, 'thread')
+    .where('thread.id = :threadId', { threadId })
+    .getRawOne<{ channelId: string }>();
 
-  return channelId;
+  if (!isDefined(thread)) {
+    throw new Error('Chat thread not found');
+  }
+
+  return thread.channelId;
 };
 
 const readChannelGrants = async (
   threadId: string,
 ): Promise<{ principalType: string; sourceId: string }[]> =>
-  global.testDataSource.query(
-    `SELECT DISTINCT "principalType", "sourceId" FROM ${SCHEMA}."recordShare"
-     WHERE "recordId" = $1 AND "rowCause" = 'RULE' AND "deletedAt" IS NULL
-     ORDER BY "principalType"`,
-    [threadId],
-  );
+  global.testDataSource
+    .createQueryBuilder()
+    .select('record_share."principalType"', 'principalType')
+    .addSelect('record_share."sourceId"', 'sourceId')
+    .distinct(true)
+    .from(`${SCHEMA}.recordShare`, 'record_share')
+    .where('record_share."recordId" = :threadId', { threadId })
+    .andWhere('record_share."rowCause" = :rowCause', { rowCause: 'RULE' })
+    .andWhere('record_share."deletedAt" IS NULL')
+    .orderBy('record_share."principalType"')
+    .getRawMany<{ principalType: string; sourceId: string }>();
 
 const readChannelGrantRoleIds = async (threadId: string): Promise<string[]> =>
   (
-    await global.testDataSource.query(
-      `SELECT "principalId" FROM ${SCHEMA}."recordShare"
-       WHERE "recordId" = $1 AND "rowCause" = 'RULE' AND "deletedAt" IS NULL
-         AND "principalType" = 'ROLE'
-       ORDER BY "principalId"`,
-      [threadId],
-    )
-  ).map(({ principalId }: { principalId: string }) => principalId);
+    await global.testDataSource
+      .createQueryBuilder()
+      .select('record_share."principalId"', 'principalId')
+      .from(`${SCHEMA}.recordShare`, 'record_share')
+      .where('record_share."recordId" = :threadId', { threadId })
+      .andWhere('record_share."rowCause" = :rowCause', { rowCause: 'RULE' })
+      .andWhere('record_share."deletedAt" IS NULL')
+      .andWhere('record_share."principalType" = :principalType', {
+        principalType: 'ROLE',
+      })
+      .orderBy('record_share."principalId"')
+      .getRawMany<{ principalId: string }>()
+  ).map(({ principalId }) => principalId);
 
 const countSessionsWaitingOnLocks = async (): Promise<number> => {
-  const [{ count }]: { count: number }[] = await global.testDataSource.query(
-    `SELECT count(*)::int AS count FROM pg_stat_activity
-     WHERE datname = current_database() AND wait_event_type = 'Lock'`,
-  );
+  const sessionCount = await global.testDataSource
+    .createQueryBuilder()
+    .select('count(*)::int', 'count')
+    .from('pg_stat_activity', 'session')
+    .where('session.datname = current_database()')
+    .andWhere('session.wait_event_type = :waitEventType', {
+      waitEventType: 'Lock',
+    })
+    .getRawOne<{ count: number }>();
 
-  return count;
+  return sessionCount?.count ?? 0;
 };
 
 const listChannels = async (token: string): Promise<ListedChannel[]> => {
@@ -704,10 +738,12 @@ describe('Uninstalling an application that created inbox channels', () => {
         workspaceId: SEED_APPLE_WORKSPACE_ID,
         channelId,
       });
-      await queryRunner.query(
-        `UPDATE ${SCHEMA}."agentChatThread" SET "channelId" = $1 WHERE id = $2`,
-        [channelId, threadId],
-      );
+      await queryRunner.manager
+        .createQueryBuilder()
+        .update(`${SCHEMA}.agentChatThread`)
+        .set({ channelId })
+        .where('id = :threadId', { threadId })
+        .execute();
 
       const uninstallResponse = uninstallApplication({
         universalIdentifier:

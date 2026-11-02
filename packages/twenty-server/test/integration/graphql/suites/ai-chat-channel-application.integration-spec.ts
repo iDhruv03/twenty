@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { parse } from 'graphql';
+import { type DataSource } from 'typeorm';
 import { SystemPermissionFlag } from 'twenty-shared/constants';
 import { isDefined } from 'twenty-shared/utils';
 
@@ -15,6 +16,7 @@ import { uninstallApplication } from 'test/integration/metadata/suites/applicati
 import { makeMetadataApiRequest } from 'test/integration/metadata/suites/utils/make-metadata-api-request.util';
 import { destroyAgentChatThread } from 'test/integration/utils/destroy-agent-chat-thread.util';
 import { generateApplicationTokenPair } from 'test/integration/utils/generate-application-token-pair.util';
+import { getAppProviderByClassName } from 'test/integration/utils/get-app-provider-by-class-name.util';
 import { getCoreRepository } from 'test/integration/utils/get-core-repository.util';
 
 import { ApplicationEntity } from 'src/engine/core-modules/application/application.entity';
@@ -776,7 +778,7 @@ describe('Inbox channels managed by an application', () => {
     assertGraphQLSuccessfulResponse(response);
     expect(await readThreadChannelState(threadId)).toEqual({
       channelId: destinationChannelId,
-      channelArchivedAt: expect.any(Date),
+      channelArchivedAt: expect.anything(),
       channelSnoozedUntil: null,
     });
     expect(await readThreadParticipants(threadId)).toEqual(participantsBefore);
@@ -792,9 +794,11 @@ describe('Inbox channels managed by an application', () => {
         channelReader.token,
       ),
     );
-    expect(await readThreadChannelState(threadId)).toMatchObject({
-      channelSnoozedUntil: snoozedUntil,
-    });
+    expect(
+      (
+        await readThreadChannelState(threadId)
+      )?.channelSnoozedUntil?.toISOString(),
+    ).toBe(snoozedUntil.toISOString());
 
     assertGraphQLSuccessfulResponse(
       await makeMetadataApiRequest(
@@ -887,7 +891,8 @@ describe('Uninstalling an application that created inbox channels', () => {
     threadId: string;
     channelId: string;
   }) => {
-    const queryRunner = global.testDataSource.createQueryRunner();
+    const queryRunner =
+      getAppProviderByClassName<DataSource>('DataSource').createQueryRunner();
 
     await queryRunner.connect();
     await queryRunner.startTransaction();

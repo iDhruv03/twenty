@@ -5,7 +5,7 @@ import { type AgentChatInboxAction } from 'twenty-shared/ai';
 import { STANDARD_OBJECTS } from 'twenty-shared/metadata';
 import { NavigationMenuItemType } from 'twenty-shared/types';
 import { isDefined, isNonEmptyArray } from 'twenty-shared/utils';
-import { type QueryRunner } from 'typeorm';
+import { type DataSource, type QueryRunner } from 'typeorm';
 
 import { assertGraphQLSuccessfulResponse } from 'test/integration/graphql/utils/graphql-test-assertions.util';
 import { createNavigationMenuItem } from 'test/integration/metadata/suites/navigation-menu-item/utils/create-navigation-menu-item.util';
@@ -483,7 +483,8 @@ describe('Chat channels through the authenticated API', () => {
   let isChannelCacheStale = false;
 
   const startHeldTransaction = async (): Promise<QueryRunner> => {
-    const queryRunner = global.testDataSource.createQueryRunner();
+    const queryRunner =
+      getAppProviderByClassName<DataSource>('DataSource').createQueryRunner();
 
     await queryRunner.connect();
     heldQueryRunners.push(queryRunner);

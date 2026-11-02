@@ -161,15 +161,13 @@ export class DefinedToolRegistryService implements OnModuleInit {
     context: ToolProviderContext;
     featureFlagsMap: FeatureFlagMap;
   }): Promise<boolean> {
-    const refusal = await this.accessPolicyService.findCallerRefusal({
+    return this.accessPolicyService.isToolAccessPolicySatisfied({
       accessPolicy,
       authPrincipalVariant: withoutAgent(context.authPrincipalVariant),
       workspaceId: context.workspaceId,
       rolePermissionConfig: context.rolePermissionConfig,
       featureFlagsMap,
     });
-
-    return !isDefined(refusal);
   }
 
   private register(options: DefineToolOptions, instance: unknown): void {
